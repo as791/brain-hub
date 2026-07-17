@@ -199,8 +199,18 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $brainhub status
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          python -c 'import re, urllib.request; base="http://127.0.0.1:4173"; html=urllib.request.urlopen(base+"/", timeout=2).read().decode(); assets=set(re.findall(r"(?:src|href)=\"(/assets/[^\"]+)\"", html)); assert assets; [urllib.request.urlopen(base+asset, timeout=2).read(1) for asset in assets]'
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $page = Invoke-WebRequest "http://127.0.0.1:4173/" -UseBasicParsing
+          $assets = [regex]::Matches(
+            $page.Content,
+            '(?:src|href)="(/assets/[^"]+)"'
+          ) | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+          if (-not $assets) { throw "web console did not reference bundled assets" }
+          foreach ($asset in $assets) {
+            $response = Invoke-WebRequest "http://127.0.0.1:4173$asset" -UseBasicParsing
+            if ($response.StatusCode -ne 200 -or $response.RawContentLength -eq 0) {
+              throw "web console asset failed to load: $asset"
+            }
+          }
           & $brainhub stop
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           & $brainhub stop

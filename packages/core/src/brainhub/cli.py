@@ -802,6 +802,12 @@ def _detach_managed_child_session() -> None:
         os.setsid()
 
 
+def _service_startup_stage(stage: str) -> None:
+    """Leave a secret-free breadcrumb when managed startup cannot complete."""
+
+    print(f"[brainhub] startup: {stage}", file=sys.stderr, flush=True)
+
+
 def _launch_service(api_port: int, ui_port: int, log_path: Path) -> subprocess.Popen:
     command = [
         sys.executable,
@@ -1116,7 +1122,9 @@ def service_command(
 ) -> None:
     """Run the supervised API and bundled UI in one foreground process."""
 
+    _service_startup_stage("command-ready")
     _detach_managed_child_session()
+    _service_startup_stage("detached")
     token = os.environ.get("BRAINHUB_API_TOKEN")
     try:
         import uvicorn
@@ -1138,17 +1146,21 @@ def service_command(
         ui_port,
         instance_id=instance_id,
     )
+    _service_startup_stage("ui-bound")
     try:
         service = build_service()
     except BaseException:
         web_server.server_close()
         raise
+    _service_startup_stage("store-open")
     with _service_lock():
+        _service_startup_stage("owner-acquired")
         web_thread: Thread | None = None
         watcher_stop: Event | None = None
         watcher_thread: Thread | None = None
         try:
             _atomic_write_service_state(state)
+            _service_startup_stage("state-published")
             candidate_web_thread = Thread(
                 target=web_server.serve_forever,
                 name="brainhub-ui",
@@ -1160,6 +1172,7 @@ def service_command(
                 token,
                 api_port=api_port,
             )
+            _service_startup_stage("watcher-ready")
             server_holder: dict[str, object] = {}
 
             def request_shutdown() -> None:
@@ -1186,6 +1199,7 @@ def service_command(
                 )
             )
             server_holder["server"] = server
+            _service_startup_stage("api-starting")
             server.run()
         finally:
             if watcher_stop is not None:
