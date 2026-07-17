@@ -3,6 +3,7 @@ import io
 import json
 import os
 import signal
+import socket
 import subprocess
 from pathlib import Path
 from threading import Event
@@ -15,19 +16,17 @@ from typer.testing import CliRunner
 
 from brainhub.api import PRODUCT_ID
 from brainhub.cli import (
-    MANAGED_CHILD_ENV,
     SERVICE_START_TIMEOUT_SECONDS,
+    _BrainHubWebServer,
     ManagedServiceState,
     _WebConsoleHandler,
     _atomic_write_service_state,
     _background_process_options,
     _configuration_matches,
-    _detach_managed_child_session,
     _ensure_service,
     _flush_spool_directly,
     _process_exists,
     _python_executable_identity,
-    _launch_service,
     _read_service_state,
     _service_config_fingerprint,
     _service_is_healthy,
@@ -593,46 +592,34 @@ def test_child_cleanup_kills_after_timeout_and_reaps() -> None:
 
 
 def test_background_process_options_are_platform_specific() -> None:
-    windows = _background_process_options(windows=True, platform="win32")
-    macos = _background_process_options(windows=False, platform="darwin")
-    linux = _background_process_options(windows=False, platform="linux")
+    windows = _background_process_options(windows=True)
+    posix = _background_process_options(windows=False)
 
     assert windows["creationflags"]
     assert "start_new_session" not in windows
-    assert macos == {"close_fds": False}
-    assert linux["start_new_session"] is True
-    assert "creationflags" not in linux
+    assert posix["start_new_session"] is True
+    assert "creationflags" not in posix
 
 
-def test_macos_launch_uses_spawn_marker_and_child_detaches_once(
-    monkeypatch, tmp_path: Path
-) -> None:
-    captured = {}
-    detached = []
+def test_web_server_bind_does_not_reverse_resolve_loopback(monkeypatch) -> None:
+    bound = []
+    monkeypatch.setattr(
+        socket,
+        "getfqdn",
+        lambda *_args: pytest.fail("loopback UI bind must not perform DNS"),
+    )
+    monkeypatch.setattr(
+        "brainhub.cli.TCPServer.server_bind",
+        lambda server: bound.append(server.server_address),
+    )
+    server = object.__new__(_BrainHubWebServer)
+    server.server_address = ("127.0.0.1", 4173)
 
-    def fake_popen(command, **options):
-        captured["command"] = command
-        captured["options"] = options
-        return SimpleNamespace(pid=123)
+    server.server_bind()
 
-    monkeypatch.setattr("brainhub.cli.os.name", "posix")
-    monkeypatch.setattr("brainhub.cli.sys.platform", "darwin")
-    monkeypatch.setattr("brainhub.cli.subprocess.Popen", fake_popen)
-    monkeypatch.setattr("brainhub.cli.os.setsid", lambda: detached.append(True))
-
-    _launch_service(18420, 14173, tmp_path / "service.log")
-
-    options = captured["options"]
-    assert options["env"][MANAGED_CHILD_ENV] == "1"
-    assert options["close_fds"] is False
-    assert "start_new_session" not in options
-
-    monkeypatch.setenv(MANAGED_CHILD_ENV, "1")
-    _detach_managed_child_session()
-    _detach_managed_child_session()
-
-    assert detached == [True]
-    assert MANAGED_CHILD_ENV not in os.environ
+    assert bound == [("127.0.0.1", 4173)]
+    assert server.server_name == "127.0.0.1"
+    assert server.server_port == 4173
 
 
 def test_ui_command_is_exposed() -> None:

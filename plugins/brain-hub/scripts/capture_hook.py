@@ -48,6 +48,12 @@ def sanitized_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         value = payload.get(key)
         if isinstance(value, (str, int, float, bool)) and len(str(value)) <= 4096:
             safe[key] = value
+    event_name = str(safe.get("hook_event_name") or "").casefold()
+    agent_id = safe.get("agent_id")
+    session_id = safe.get("session_id")
+    if event_name in {"subagentstart", "subagentstop"} and agent_id and session_id:
+        safe["parent_session_id"] = session_id
+        safe["session_id"] = agent_id
     return safe
 
 

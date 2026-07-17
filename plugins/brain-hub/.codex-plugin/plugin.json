@@ -1,6 +1,6 @@
 {
   "name": "brain-hub",
-  "version": "0.1.0+codex.20260717073546",
+  "version": "0.1.0+codex.20260717143306",
   "description": "Register agent work in an evidence-backed temporal knowledge graph and search it from Codex.",
   "author": {
     "name": "Brain Hub contributors"

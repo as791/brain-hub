@@ -47,6 +47,21 @@ class ContractTests(unittest.TestCase):
                 {**common, "hook_event_name": "PreToolUse"},
             ).id,
         )
+        self.assertEqual(before.data["status"], "started")
+        self.assertEqual(after.data["status"], "started")
+
+    def test_subagent_lifecycle_has_started_and_completed_statuses(self) -> None:
+        started = normalize_capture(
+            "codex",
+            {"session_id": "child-1", "hook_event_name": "SubagentStart"},
+        )
+        completed = normalize_capture(
+            "codex",
+            {"session_id": "child-1", "hook_event_name": "SubagentStop"},
+        )
+
+        self.assertEqual(started.data["status"], "started")
+        self.assertEqual(completed.data["status"], "completed")
 
     def test_invalid_host_time_uses_stable_unknown_sentinel(self) -> None:
         payload = self.fixture("cursor/stop.json")

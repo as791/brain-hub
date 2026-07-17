@@ -38,6 +38,12 @@ _START_EVENTS = {
     "run.started",
     "start",
     "started",
+    "userpromptsubmit",
+    "pretooluse",
+    "posttooluse",
+    "precompact",
+    "postcompact",
+    "subagentstart",
 }
 _COMPLETE_EVENTS = {
     "agent-turn-complete",
@@ -49,6 +55,7 @@ _COMPLETE_EVENTS = {
     "turn.completed",
     "run.completed",
     "completed",
+    "subagentstop",
 }
 _FAILED_EVENTS = {"error", "failed", "failure", "run.failed", "turn.failed"}
 _CANCELLED_EVENTS = {"cancel", "cancelled", "canceled", "run.cancelled"}

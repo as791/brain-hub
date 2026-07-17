@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from socketserver import TCPServer
 from threading import Event, Thread
 from typing import Annotated, BinaryIO, Iterator
 from urllib import error, request
@@ -48,7 +49,6 @@ app = typer.Typer(
 )
 
 SERVICE_START_TIMEOUT_SECONDS = 30.0
-MANAGED_CHILD_ENV = "BRAINHUB_INTERNAL_MANAGED_CHILD"
 
 
 @dataclass(frozen=True, slots=True)
@@ -770,42 +770,13 @@ def _terminate_service_process(
     raise RuntimeError(f"Brain Hub process {pid} did not exit")
 
 
-def _background_process_options(
-    *,
-    windows: bool | None = None,
-    platform: str | None = None,
-) -> dict[str, object]:
+def _background_process_options(*, windows: bool | None = None) -> dict[str, object]:
     selected_windows = os.name == "nt" if windows is None else windows
     if selected_windows:
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
         creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         return {"close_fds": True, "creationflags": creationflags}
-    selected_platform = sys.platform if platform is None else platform
-    if selected_platform == "darwin":
-        # CPython 3.11 only uses posix_spawn here when close_fds is false and
-        # start_new_session is absent. Avoiding fork_exec matters after the CLI
-        # has imported native/threaded dependencies: a forked macOS child can
-        # otherwise wedge before exec and never publish service state. PEP 446
-        # keeps ordinary descriptors non-inheritable, and the child calls
-        # setsid immediately after exec via the private marker below.
-        return {"close_fds": False}
     return {"close_fds": True, "start_new_session": True}
-
-
-def _detach_managed_child_session() -> None:
-    """Finish macOS daemon detachment after a safe posix_spawn/exec."""
-
-    if os.environ.get(MANAGED_CHILD_ENV) != "1":
-        return
-    os.environ.pop(MANAGED_CHILD_ENV, None)
-    if os.name == "posix" and sys.platform == "darwin":
-        os.setsid()
-
-
-def _service_startup_stage(stage: str) -> None:
-    """Leave a secret-free breadcrumb when managed startup cannot complete."""
-
-    print(f"[brainhub] startup: {stage}", file=sys.stderr, flush=True)
 
 
 def _launch_service(api_port: int, ui_port: int, log_path: Path) -> subprocess.Popen:
@@ -819,14 +790,9 @@ def _launch_service(api_port: int, ui_port: int, log_path: Path) -> subprocess.P
         "--ui-port",
         str(ui_port),
     ]
-    environment = None
-    if os.name == "posix" and sys.platform == "darwin":
-        environment = os.environ.copy()
-        environment[MANAGED_CHILD_ENV] = "1"
     with log_path.open("ab") as log:
         return subprocess.Popen(
             command,
-            env=environment,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -977,6 +943,16 @@ class _WebConsoleHandler(SimpleHTTPRequestHandler):
         return
 
 
+class _BrainHubWebServer(ThreadingHTTPServer):
+    """Bind the loopback UI without HTTPServer's blocking reverse-DNS lookup."""
+
+    def server_bind(self) -> None:
+        TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
+
+
 @app.command()
 def serve(
     db: Annotated[Path | None, typer.Option(help="SQLite database path.")] = None,
@@ -1027,7 +1003,7 @@ def _build_web_server(
         instance_id=instance_id,
     )
     try:
-        return ThreadingHTTPServer((host, port), handler)
+        return _BrainHubWebServer((host, port), handler)
     except OSError as exc:
         raise typer.BadParameter(f"cannot start web console on {host}:{port}: {exc}") from exc
 
@@ -1122,18 +1098,13 @@ def service_command(
 ) -> None:
     """Run the supervised API and bundled UI in one foreground process."""
 
-    _service_startup_stage("command-ready")
-    _detach_managed_child_session()
-    _service_startup_stage("detached")
     token = os.environ.get("BRAINHUB_API_TOKEN")
     try:
         import uvicorn
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise typer.BadParameter("uvicorn is not installed") from exc
-    _service_startup_stage("runtime-imported")
     instance_id = uuid.uuid4().hex
     control_token = secrets.token_urlsafe(32)
-    _service_startup_stage("identity-created")
     state = ManagedServiceState(
         pid=os.getpid(),
         instance_id=instance_id,
@@ -1143,28 +1114,22 @@ def service_command(
         python_executable=_python_executable_identity(),
         config_fingerprint=_service_config_fingerprint(),
     )
-    _service_startup_stage("state-prepared")
-    _service_startup_stage("ui-binding")
     web_server = _build_web_server(
         "127.0.0.1",
         ui_port,
         instance_id=instance_id,
     )
-    _service_startup_stage("ui-bound")
     try:
         service = build_service()
     except BaseException:
         web_server.server_close()
         raise
-    _service_startup_stage("store-open")
     with _service_lock():
-        _service_startup_stage("owner-acquired")
         web_thread: Thread | None = None
         watcher_stop: Event | None = None
         watcher_thread: Thread | None = None
         try:
             _atomic_write_service_state(state)
-            _service_startup_stage("state-published")
             candidate_web_thread = Thread(
                 target=web_server.serve_forever,
                 name="brainhub-ui",
@@ -1176,7 +1141,6 @@ def service_command(
                 token,
                 api_port=api_port,
             )
-            _service_startup_stage("watcher-ready")
             server_holder: dict[str, object] = {}
 
             def request_shutdown() -> None:
@@ -1203,7 +1167,6 @@ def service_command(
                 )
             )
             server_holder["server"] = server
-            _service_startup_stage("api-starting")
             server.run()
         finally:
             if watcher_stop is not None:

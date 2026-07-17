@@ -63,6 +63,22 @@ class CodexHookLauncherTests(unittest.TestCase):
             with patch.dict(HOOK.os.environ, {}, clear=True):
                 self.assertEqual(HOOK.hook_executable(plugin), str(executable))
 
+    def test_subagent_becomes_child_session_without_forwarding_content(self) -> None:
+        safe = HOOK.sanitized_payload(
+            {
+                "hook_event_name": "SubagentStart",
+                "session_id": "parent-session",
+                "agent_id": "child-agent",
+                "agent_type": "explorer",
+                "prompt": "private delegation",
+            }
+        )
+
+        self.assertEqual(safe["session_id"], "child-agent")
+        self.assertEqual(safe["parent_session_id"], "parent-session")
+        self.assertEqual(safe["agent_type"], "explorer")
+        self.assertNotIn("prompt", safe)
+
     def test_installed_plugin_never_falls_back_to_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             plugin = Path(temporary) / "marketplace" / "plugins" / "brain-hub"
