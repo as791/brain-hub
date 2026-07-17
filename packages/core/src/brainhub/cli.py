@@ -48,6 +48,7 @@ app = typer.Typer(
 )
 
 SERVICE_START_TIMEOUT_SECONDS = 30.0
+MANAGED_CHILD_ENV = "BRAINHUB_INTERNAL_MANAGED_CHILD"
 
 
 @dataclass(frozen=True, slots=True)
@@ -769,13 +770,36 @@ def _terminate_service_process(
     raise RuntimeError(f"Brain Hub process {pid} did not exit")
 
 
-def _background_process_options(*, windows: bool | None = None) -> dict[str, object]:
+def _background_process_options(
+    *,
+    windows: bool | None = None,
+    platform: str | None = None,
+) -> dict[str, object]:
     selected_windows = os.name == "nt" if windows is None else windows
     if selected_windows:
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
         creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         return {"close_fds": True, "creationflags": creationflags}
+    selected_platform = sys.platform if platform is None else platform
+    if selected_platform == "darwin":
+        # CPython 3.11 only uses posix_spawn here when close_fds is false and
+        # start_new_session is absent. Avoiding fork_exec matters after the CLI
+        # has imported native/threaded dependencies: a forked macOS child can
+        # otherwise wedge before exec and never publish service state. PEP 446
+        # keeps ordinary descriptors non-inheritable, and the child calls
+        # setsid immediately after exec via the private marker below.
+        return {"close_fds": False}
     return {"close_fds": True, "start_new_session": True}
+
+
+def _detach_managed_child_session() -> None:
+    """Finish macOS daemon detachment after a safe posix_spawn/exec."""
+
+    if os.environ.get(MANAGED_CHILD_ENV) != "1":
+        return
+    os.environ.pop(MANAGED_CHILD_ENV, None)
+    if os.name == "posix" and sys.platform == "darwin":
+        os.setsid()
 
 
 def _launch_service(api_port: int, ui_port: int, log_path: Path) -> subprocess.Popen:
@@ -789,9 +813,14 @@ def _launch_service(api_port: int, ui_port: int, log_path: Path) -> subprocess.P
         "--ui-port",
         str(ui_port),
     ]
+    environment = None
+    if os.name == "posix" and sys.platform == "darwin":
+        environment = os.environ.copy()
+        environment[MANAGED_CHILD_ENV] = "1"
     with log_path.open("ab") as log:
         return subprocess.Popen(
             command,
+            env=environment,
             stdin=subprocess.DEVNULL,
             stdout=log,
             stderr=subprocess.STDOUT,
@@ -874,9 +903,15 @@ def _ensure_service(*, api_port: int = 8420, ui_port: int = 4173) -> tuple[int, 
             and _configuration_matches(state, expected_config)
             and _service_is_healthy(state)
         ):
-            if state.pid != process.pid:
+            # A Windows venv's python.exe is a redirector: Popen owns the
+            # redirector PID while the child interpreter writes its own PID to
+            # service.json. Terminating that apparently "different" process is
+            # destructive because the redirector keeps its child in a
+            # kill-on-close Job object. The healthy state plus the named mutex
+            # is the service authority on Windows; the launcher PID is not.
+            if state.pid != process.pid and os.name != "nt":
                 _terminate_and_reap_child(process)
-            return state.pid, state.pid == process.pid
+            return state.pid, state.pid == process.pid or os.name == "nt"
         if process.poll() is not None and state is None:
             break
         time.sleep(0.1)
@@ -1081,6 +1116,7 @@ def service_command(
 ) -> None:
     """Run the supervised API and bundled UI in one foreground process."""
 
+    _detach_managed_child_session()
     token = os.environ.get("BRAINHUB_API_TOKEN")
     try:
         import uvicorn

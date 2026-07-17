@@ -15,16 +15,19 @@ from typer.testing import CliRunner
 
 from brainhub.api import PRODUCT_ID
 from brainhub.cli import (
+    MANAGED_CHILD_ENV,
     SERVICE_START_TIMEOUT_SECONDS,
     ManagedServiceState,
     _WebConsoleHandler,
     _atomic_write_service_state,
     _background_process_options,
     _configuration_matches,
+    _detach_managed_child_session,
     _ensure_service,
     _flush_spool_directly,
     _process_exists,
     _python_executable_identity,
+    _launch_service,
     _read_service_state,
     _service_config_fingerprint,
     _service_is_healthy,
@@ -448,6 +451,46 @@ def test_identity_mismatch_stops_and_restarts(monkeypatch, tmp_path: Path) -> No
     assert stopped == [old]
 
 
+def test_windows_venv_redirector_pid_does_not_kill_healthy_service(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The Windows venv redirector PID is not the managed Python child's PID."""
+
+    state = managed_state(
+        pid=456,
+        instance_id="redirected-child",
+        python_executable="C:\\managed\\python.exe",
+        config_fingerprint="a" * 64,
+    )
+    states = iter([None, state])
+    reaped = []
+
+    class Redirector:
+        pid = 123
+
+        @staticmethod
+        def poll():
+            return None
+
+    monkeypatch.setattr("brainhub.cli.os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        "brainhub.cli._python_executable_identity",
+        lambda: "C:\\managed\\python.exe",
+    )
+    monkeypatch.setattr("brainhub.cli._service_config_fingerprint", lambda: "a" * 64)
+    monkeypatch.setattr("brainhub.cli._read_service_state", lambda: next(states))
+    monkeypatch.setattr("brainhub.cli._launch_service", lambda *_args: Redirector())
+    monkeypatch.setattr("brainhub.cli._service_is_healthy", lambda value: value is state)
+    monkeypatch.setattr("brainhub.cli._runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        "brainhub.cli._terminate_and_reap_child",
+        lambda process: reaped.append(process),
+    )
+
+    assert _ensure_service() == (456, True)
+    assert reaped == []
+
+
 def test_graph_authority_mismatch_stops_and_restarts(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -550,13 +593,46 @@ def test_child_cleanup_kills_after_timeout_and_reaps() -> None:
 
 
 def test_background_process_options_are_platform_specific() -> None:
-    windows = _background_process_options(windows=True)
-    posix = _background_process_options(windows=False)
+    windows = _background_process_options(windows=True, platform="win32")
+    macos = _background_process_options(windows=False, platform="darwin")
+    linux = _background_process_options(windows=False, platform="linux")
 
     assert windows["creationflags"]
     assert "start_new_session" not in windows
-    assert posix["start_new_session"] is True
-    assert "creationflags" not in posix
+    assert macos == {"close_fds": False}
+    assert linux["start_new_session"] is True
+    assert "creationflags" not in linux
+
+
+def test_macos_launch_uses_spawn_marker_and_child_detaches_once(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured = {}
+    detached = []
+
+    def fake_popen(command, **options):
+        captured["command"] = command
+        captured["options"] = options
+        return SimpleNamespace(pid=123)
+
+    monkeypatch.setattr("brainhub.cli.os.name", "posix")
+    monkeypatch.setattr("brainhub.cli.sys.platform", "darwin")
+    monkeypatch.setattr("brainhub.cli.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("brainhub.cli.os.setsid", lambda: detached.append(True))
+
+    _launch_service(18420, 14173, tmp_path / "service.log")
+
+    options = captured["options"]
+    assert options["env"][MANAGED_CHILD_ENV] == "1"
+    assert options["close_fds"] is False
+    assert "start_new_session" not in options
+
+    monkeypatch.setenv(MANAGED_CHILD_ENV, "1")
+    _detach_managed_child_session()
+    _detach_managed_child_session()
+
+    assert detached == [True]
+    assert MANAGED_CHILD_ENV not in os.environ
 
 
 def test_ui_command_is_exposed() -> None:
