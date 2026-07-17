@@ -1130,8 +1130,10 @@ def service_command(
         import uvicorn
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise typer.BadParameter("uvicorn is not installed") from exc
+    _service_startup_stage("runtime-imported")
     instance_id = uuid.uuid4().hex
     control_token = secrets.token_urlsafe(32)
+    _service_startup_stage("identity-created")
     state = ManagedServiceState(
         pid=os.getpid(),
         instance_id=instance_id,
@@ -1141,6 +1143,8 @@ def service_command(
         python_executable=_python_executable_identity(),
         config_fingerprint=_service_config_fingerprint(),
     )
+    _service_startup_stage("state-prepared")
+    _service_startup_stage("ui-binding")
     web_server = _build_web_server(
         "127.0.0.1",
         ui_port,
