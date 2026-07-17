@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brainhub.local/schemas/cloudevent.schema.json",
+  "title": "Brain Hub adapter event",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["specversion", "id", "source", "type", "subject", "time", "datacontenttype", "data"],
+  "properties": {
+    "specversion": {"const": "1.0"},
+    "id": {"type": "string", "minLength": 8, "maxLength": 256},
+    "source": {"type": "string", "format": "uri", "maxLength": 512},
+    "type": {"type": "string", "pattern": "^com\\.brainhub\\.[a-z0-9.]+\\.v[1-9][0-9]*$", "maxLength": 200},
+    "subject": {"type": "string", "minLength": 1, "maxLength": 512},
+    "time": {"type": "string", "format": "date-time"},
+    "datacontenttype": {"const": "application/json"},
+    "data": {"$ref": "#/$defs/data"}
+  },
+  "$defs": {
+    "data": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["agent", "workspace_id", "session_id", "status", "capture"],
+      "properties": {
+        "agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["product", "surface"],
+          "properties": {
+            "product": {"type": "string", "minLength": 1, "maxLength": 80},
+            "surface": {"type": "string", "minLength": 1, "maxLength": 80},
+            "version": {"type": "string", "maxLength": 80}
+          }
+        },
+        "workspace_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "turn_id": {"type": "string", "maxLength": 256},
+        "parent_session_id": {"type": "string", "maxLength": 256},
+        "status": {"enum": ["started", "completed", "failed", "cancelled", "unknown"]},
+        "summary": {"type": "string", "maxLength": 4000},
+        "artifacts": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
+        "capture": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "content_level"],
+          "properties": {
+            "mode": {"enum": ["hook", "otlp", "stream", "mcp", "manual", "import"]},
+            "content_level": {"enum": ["metadata", "summary", "content"]},
+            "redactions": {"type": "array", "items": {"type": "string"}, "maxItems": 100}
+          }
+        }
+      }
+    }
+  }
+}

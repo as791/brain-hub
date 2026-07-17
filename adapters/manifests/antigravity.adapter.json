@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "id": "google.antigravity",
+  "display_name": "Google Antigravity",
+  "version": "0.1.0",
+  "command": ["brainhub-antigravity-hook"],
+  "delivery": {
+    "command": ["brainhub-adapter", "watch"],
+    "token_env": "BRAINHUB_API_TOKEN",
+    "supervision": "foreground"
+  },
+  "inputs": ["hook", "stream", "mcp"],
+  "privacy": {
+    "default_content_level": "metadata",
+    "reads_transcripts": false,
+    "absolute_paths": "hash"
+  }
+}

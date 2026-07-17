@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "id": "cursor.cursor",
+  "display_name": "Cursor",
+  "version": "0.1.0",
+  "command": ["brainhub-cursor-hook"],
+  "delivery": {
+    "command": ["brainhub-adapter", "watch"],
+    "token_env": "BRAINHUB_API_TOKEN",
+    "supervision": "foreground"
+  },
+  "inputs": ["hook", "stream", "mcp"],
+  "privacy": {
+    "default_content_level": "metadata",
+    "reads_transcripts": false,
+    "absolute_paths": "hash"
+  }
+}

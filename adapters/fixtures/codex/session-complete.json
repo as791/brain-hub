@@ -1,0 +1,11 @@
+{
+  "event": "agent-turn-complete",
+  "event_id": "codex-event-101",
+  "thread_id": "codex-thread-22",
+  "cwd": "/private/work/customer-project",
+  "brainhub_summary": "Implemented the graph ingestion endpoint and verified its idempotency.",
+  "changed_files": [
+    "/private/work/customer-project/src/events.py"
+  ],
+  "model": "codex"
+}

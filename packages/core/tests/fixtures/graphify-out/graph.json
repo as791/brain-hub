@@ -1,0 +1,17 @@
+{
+  "graphify_version": "0.9.16",
+  "metadata": {"source_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "nodes": [
+    {"id": "node-a", "type": "concept", "label": "Capture", "description": "Supported agent capture", "source_file": "/Users/private/repo/design.md", "source_location": "L10-L18"},
+    {"id": "node-b", "type": "decision", "label": "Hooks", "description": "Prefer supported hooks", "source_file": "docs/design.md", "source_location": "L20"},
+    {"id": "node-c", "type": "artifact", "label": "Plugin", "description": "Marketplace plugin"}
+  ],
+  "edges": [
+    {"id": "edge-extracted", "source": "node-a", "target": "node-b", "relation": "DEPENDS_ON", "description": "Capture depends on hook support.", "confidence_class": "EXTRACTED", "score": 0.98, "source_file": "/Users/private/repo/design.md"},
+    {"id": "edge-inferred", "source": "node-b", "target": "node-c", "relation": "PRODUCED", "description": "The decision informed the plugin.", "confidence_class": "INFERRED", "score": 0.72},
+    {"id": "edge-ambiguous", "source": "node-a", "target": "node-c", "relation": "related to", "description": "A possible relationship.", "confidence_class": "AMBIGUOUS", "score": 0.25}
+  ],
+  "hyperedges": [
+    {"id": "hyper-1", "label": "Capture design review", "participants": ["node-a", "node-b", "node-c"], "confidence_class": "INFERRED", "score": 0.66, "source_file": "/Users/private/repo/review.md", "source_location": "00:14:20"}
+  ]
+}

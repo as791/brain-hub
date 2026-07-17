@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brainhub-adapters"
+version = "0.1.0"
+description = "Privacy-preserving ingestion adapters for Brain Hub"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "Brain Hub contributors"}]
+dependencies = []
+
+[project.scripts]
+brainhub-adapter = "brainhub_adapters.cli:main"
+brainhub-codex-hook = "brainhub_adapters.codex:main"
+brainhub-claude-hook = "brainhub_adapters.claude:main"
+brainhub-cursor-hook = "brainhub_adapters.cursor:main"
+brainhub-antigravity-hook = "brainhub_adapters.antigravity:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

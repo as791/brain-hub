@@ -1,0 +1,36 @@
+{
+  "name": "brain-hub",
+  "version": "0.1.0",
+  "description": "Register agent work in an evidence-backed temporal knowledge graph and search it from Codex.",
+  "author": {
+    "name": "Brain Hub contributors"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "knowledge-graph",
+    "agent-memory",
+    "workstreams",
+    "semantic-search"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Brain Hub",
+    "shortDescription": "Connect Codex work to your private knowledge graph.",
+    "longDescription": "Brain Hub records goals, decisions, artifacts, evidence, and semantic connections across agent workstreams, then supports anchored hybrid search and graph traversal.",
+    "developerName": "Brain Hub contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Semantic search",
+      "Graph traversal"
+    ],
+    "defaultPrompt": [
+      "Register this workstream in Brain Hub.",
+      "Search Brain Hub for related prior decisions.",
+      "Continue from this Brain Hub node."
+    ],
+    "brandColor": "#65DDB8"
+  }
+}

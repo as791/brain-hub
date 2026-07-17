@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<evaluation>
+  <qa_pair>
+    <question>In the fixed Brain Hub demo recorded on 2026-07-17, find the low-confidence claim about transcript compatibility, then follow the assertion that replaces it. Return the replacement node title exactly.</question>
+    <answer>Prefer supported hooks</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Start from the Brain Hub product workstream in the fixed demo, stay within two hops, and identify the inferred claim connected through the hybrid-search topic. Return the claim title exactly.</question>
+    <answer>Anchored search prevents drift</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Inspect the fixed demo's local workspace and count only outgoing HAS_RUN assertions whose target is a Run node. Return one integer.</question>
+    <answer>3</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Find the Agent adapters task in the fixed demo and trace the incoming MODIFIES assertion. Return the source run title exactly.</question>
+    <answer>Cursor adapter run</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>From the Temporal knowledge graph topic in the fixed demo, inspect its dependency decisions and choose the one whose evidence says analysis stays server-side rather than rendering in the browser. Return its title exactly.</question>
+    <answer>NetworkX analysis layer</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Find the ambiguous transcript-schema claim and the supported-hooks decision in the fixed demo. What is the uppercase relation on the directed assertion from the claim to the decision?</question>
+    <answer>CONTRADICTS</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Expand the Codex implementation run in the fixed demo and count its outgoing PRODUCED assertions to Artifact nodes. Return one integer.</question>
+    <answer>2</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Trace the assertion from Semble hybrid search to the claim about preventing drift in the fixed demo. Return its confidence class exactly as uppercase text.</question>
+    <answer>INFERRED</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Find the actor titled Brain Hub owner in the fixed demo, follow the outgoing PARTICIPATES_IN assertion, and return the target workstream title exactly.</question>
+    <answer>Brain Hub product</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Within two hops of Temporal knowledge graph in the fixed demo, find the decision whose evidence identifies the canonical local WAL event/projection store. Return the node title exactly.</question>
+    <answer>SQLite event store</answer>
+  </qa_pair>
+</evaluation>

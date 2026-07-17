@@ -1,0 +1,45 @@
+name: brainhub-local
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    environment:
+      BRAINHUB_DB_PATH: /data/brainhub.db
+      BRAINHUB_MASTER_KEY: ${BRAINHUB_MASTER_KEY:?set BRAINHUB_MASTER_KEY to a URL-safe base64 32-byte key}
+      BRAINHUB_API_TOKEN: ${BRAINHUB_API_TOKEN:?set BRAINHUB_API_TOKEN}
+      BRAINHUB_ALLOW_RAW_CONTENT: "false"
+    ports:
+      - "127.0.0.1:8420:8420"
+    volumes:
+      - brainhub-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:4173:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /var/cache/nginx:size=32m,mode=0755
+      - /var/run:size=4m,mode=0755
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  brainhub-data:

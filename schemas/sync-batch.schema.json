@@ -1,0 +1,149 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brainhub.local/schemas/sync-batch.schema.json",
+  "title": "Brain Hub graph-only sync batch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["installation_id", "batch_id", "first_sequence", "last_sequence", "events"],
+  "properties": {
+    "installation_id": {"type": "string", "format": "uuid"},
+    "batch_id": {"type": "string", "format": "uuid"},
+    "first_sequence": {"type": "integer", "minimum": 1},
+    "last_sequence": {"type": "integer", "minimum": 1},
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sequence", "event_id", "event_type", "recorded_at", "canonical_sha256", "graph_payload"],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 1},
+          "event_id": {"type": "string", "minLength": 8, "maxLength": 256},
+          "event_type": {"type": "string", "maxLength": 200},
+          "recorded_at": {"type": "string", "format": "date-time"},
+          "canonical_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA-256 of the canonical policy-filtered graph_payload; never a digest of the local raw event."
+          },
+          "graph_payload": {
+            "type": "object",
+            "description": "Versioned policy-filtered graph facts only; raw content is forbidden.",
+            "additionalProperties": false,
+            "required": ["projector", "source_sequence", "nodes", "edges"],
+            "properties": {
+              "projector": {"type": "string", "minLength": 1, "maxLength": 80},
+              "source_sequence": {"type": "integer", "minimum": 1},
+              "nodes": {
+                "type": "array",
+                "maxItems": 100000,
+                "items": {"$ref": "#/$defs/nodeFact"}
+              },
+              "edges": {
+                "type": "array",
+                "maxItems": 1000000,
+                "items": {"$ref": "#/$defs/edgeFact"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nullableDateTime": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "nullableShortString": {
+      "type": ["string", "null"],
+      "maxLength": 512
+    },
+    "evidenceFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "source_event_id", "opaque_uri", "anchor", "content_hash", "visibility"],
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 3, "maxLength": 256},
+        "source_event_id": {"type": "string", "minLength": 8, "maxLength": 256},
+        "opaque_uri": {"type": ["string", "null"], "maxLength": 512},
+        "anchor": {"$ref": "#/$defs/nullableShortString"},
+        "content_hash": {"type": ["string", "null"], "maxLength": 128},
+        "visibility": {"const": "SYNCABLE"}
+      }
+    },
+    "nodeFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "type", "title", "summary", "sensitivity", "review_state",
+        "valid_from", "valid_to", "recorded_from", "recorded_to",
+        "source_event_id", "actor_id", "extractor", "extractor_version",
+        "external_ids", "content_hash", "evidence"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 3, "maxLength": 256},
+        "type": {"enum": ["WORKSTREAM", "RUN", "TOPIC", "TASK", "DECISION", "ARTIFACT", "CLAIM", "ACTOR", "WORKSPACE"]},
+        "title": {"type": "string", "minLength": 1, "maxLength": 300},
+        "summary": {"type": "string", "maxLength": 4000},
+        "sensitivity": {"enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"]},
+        "review_state": {"enum": ["UNREVIEWED", "ACCEPTED", "REJECTED", "NEEDS_REVIEW"]},
+        "valid_from": {"type": "string", "format": "date-time"},
+        "valid_to": {"$ref": "#/$defs/nullableDateTime"},
+        "recorded_from": {"type": "string", "format": "date-time"},
+        "recorded_to": {"$ref": "#/$defs/nullableDateTime"},
+        "source_event_id": {"type": "string", "minLength": 8, "maxLength": 256},
+        "actor_id": {"$ref": "#/$defs/nullableShortString"},
+        "extractor": {"type": "string", "minLength": 1, "maxLength": 120},
+        "extractor_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "external_ids": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {"type": "string", "pattern": "^external:[a-f0-9]{32}$"}
+        },
+        "content_hash": {"type": ["string", "null"], "maxLength": 128},
+        "evidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {"$ref": "#/$defs/evidenceFact"}
+        }
+      }
+    },
+    "edgeFact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "source_id", "target_id", "relation", "explanation",
+        "confidence_class", "confidence_score", "sensitivity", "review_state",
+        "valid_from", "valid_to", "recorded_from", "recorded_to",
+        "source_event_id", "actor_id", "extractor", "extractor_version", "evidence"
+      ],
+      "properties": {
+        "id": {"type": "string", "minLength": 3, "maxLength": 256},
+        "source_id": {"type": "string", "minLength": 3, "maxLength": 256},
+        "target_id": {"type": "string", "minLength": 3, "maxLength": 256},
+        "relation": {"enum": ["HAS_RUN", "ABOUT", "PRODUCED", "USED", "MODIFIES", "DEPENDS_ON", "BLOCKS", "DECIDED_IN", "DERIVED_FROM", "REFERENCES", "VERIFIES", "CONTRADICTS", "SUPERSEDES", "CONTINUES", "ASSERTED_BY", "PARTICIPATES_IN"]},
+        "explanation": {"type": "string", "minLength": 1, "maxLength": 320},
+        "confidence_class": {"enum": ["EXTRACTED", "INFERRED", "AMBIGUOUS"]},
+        "confidence_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "sensitivity": {"enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "RESTRICTED"]},
+        "review_state": {"enum": ["UNREVIEWED", "ACCEPTED", "REJECTED", "NEEDS_REVIEW"]},
+        "valid_from": {"type": "string", "format": "date-time"},
+        "valid_to": {"$ref": "#/$defs/nullableDateTime"},
+        "recorded_from": {"type": "string", "format": "date-time"},
+        "recorded_to": {"$ref": "#/$defs/nullableDateTime"},
+        "source_event_id": {"type": "string", "minLength": 8, "maxLength": 256},
+        "actor_id": {"$ref": "#/$defs/nullableShortString"},
+        "extractor": {"type": "string", "minLength": 1, "maxLength": 120},
+        "extractor_version": {"type": "string", "minLength": 1, "maxLength": 80},
+        "evidence": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {"$ref": "#/$defs/evidenceFact"}
+        }
+      }
+    }
+  }
+}

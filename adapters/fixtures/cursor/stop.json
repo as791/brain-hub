@@ -1,0 +1,7 @@
+{
+  "event_name": "stop",
+  "conversation_id": "cursor-conversation-13",
+  "workspace": "/private/work/customer-project",
+  "summary": "Added the temporal graph query controls.",
+  "files": ["/private/work/customer-project/apps/web/src/Timeline.tsx"]
+}

@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "SessionEnd",
+  "session_id": "claude-session-44",
+  "cwd": "/private/work/customer-project",
+  "transcript_path": "/private/state/transcript.jsonl",
+  "summary": "Chose an event-sourced projection after comparing update semantics.",
+  "reason": "completed"
+}

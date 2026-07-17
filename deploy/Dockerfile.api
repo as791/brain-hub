@@ -1,0 +1,24 @@
+FROM python:3.13-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_HOME=/tmp/brainhub-hf \
+    SEMBLE_CACHE_LOCATION=/tmp/brainhub-semble
+
+WORKDIR /app
+COPY pyproject.toml README.md ./
+COPY packages/core ./packages/core
+RUN python -m pip install --no-cache-dir . \
+    && useradd --create-home --uid 10001 brainhub \
+    && mkdir -p /data \
+    && chown brainhub:brainhub /data
+
+USER 10001:10001
+EXPOSE 8420
+VOLUME ["/data"]
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8420/healthz', timeout=2)"]
+
+ENTRYPOINT ["brainhub"]
+CMD ["serve", "--host", "0.0.0.0", "--port", "8420", "--allow-non-loopback"]

@@ -1,0 +1,25 @@
+name: brainhub-cloud-dev
+
+services:
+  graph-db:
+    image: apache/age:release_PG18_1.7.0
+    environment:
+      POSTGRES_DB: brainhub
+      POSTGRES_USER: brainhub
+      POSTGRES_PASSWORD: brainhub-development-only
+    ports:
+      - "127.0.0.1:5438:5432"
+    volumes:
+      # PostgreSQL 18 places versioned PGDATA below this parent directory.
+      - graph-data:/var/lib/postgresql
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+      - ./tests:/brainhub-tests:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U brainhub -d brainhub"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  graph-data:

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "brain-hub": {
+      "type": "stdio",
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "if [ -x \"$HOME/.local/share/brainhub/venv/bin/brainhub\" ]; then exec \"$HOME/.local/share/brainhub/venv/bin/brainhub\" mcp; elif command -v brainhub >/dev/null 2>&1; then exec brainhub mcp; else echo 'Brain Hub runtime is missing. Run make install-plugin-runtime from the Brain Hub repository.' >&2; exit 127; fi"
+      ]
+    }
+  }
+}
