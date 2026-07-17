@@ -15,6 +15,10 @@ and three negative cases are deliberately distinct.
    edge explanations, confidence class, score, and evidence references are returned.
 5. **Correction over time** — Correct a prior decision; verify the original remains queryable
    and the new fact uses `SUPERSEDES` with valid and recorded times.
+6. **Automatic lifecycle capture** — Trust the bundled hooks, start a task, run a tool,
+   compact context, and stop; verify start, pre/post tool, compact, and stop metadata is
+   delivered by the plugin MCP's direct spool watcher or the optional managed service
+   without a separate user-run watcher.
 
 ## Negative
 

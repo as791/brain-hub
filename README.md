@@ -9,7 +9,7 @@ The product treats agent memory as auditable data rather than a transcript dump:
 - immutable source events and replayable projections so extraction can improve without rewriting history;
 - exact-identity merges only; similar ideas remain distinct until a user confirms a duplicate through review feedback;
 - local encrypted content, metadata/summary capture by default, and graph-only cloud sync when explicitly enabled;
-- Semble hybrid retrieval plus bounded graph traversal, including hard two-hop searches anchored at a selected node;
+- Semble hybrid retrieval plus bounded graph traversal, with a two-hop default and an explicit maximum depth of 20 anchored at a selected node;
 - a WebGL 3D graph with a time dimension, camera focus, evidence drawer, and accessible 2D/list fallbacks.
 
 ## Repository map
@@ -23,23 +23,115 @@ cloud/               Optional Postgres/Apache AGE graph-sync schema
 docs/                Architecture, contracts, security, operations, and launch gates
 ```
 
-## Quick start
+## Install
 
-Prerequisites are Python 3.11+ and Node.js 20+.
+The installer needs Python 3.11 or newer; end users do not need Node.js, npm,
+Docker, or an activated virtual environment.
+
+These `main`-channel commands install the latest public preview. They intentionally
+follow a mutable branch and are not reproducible release installs.
+
+macOS or Linux:
+
+```sh
+sh -c 'set -eu; f=$(mktemp); cleanup() { rm -f "$f"; }; trap cleanup EXIT; curl --proto "=https" --tlsv1.2 --max-filesize 1048576 -fsSLo "$f" https://raw.githubusercontent.com/as791/brain-hub/main/scripts/install.sh; sh "$f"' && export PATH="$HOME/.local/bin:$PATH"
+```
+
+Windows PowerShell:
+
+```powershell
+[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; $p=Join-Path ([IO.Path]::GetTempPath()) ("brainhub-"+[Guid]::NewGuid().ToString("N")+".ps1"); try { Invoke-WebRequest https://raw.githubusercontent.com/as791/brain-hub/main/scripts/install.ps1 -MaximumRedirection 0 -OutFile $p; if((Get-Item $p).Length -gt 1MB){throw "Installer is larger than 1 MB"}; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p; if ($LASTEXITCODE) { exit $LASTEXITCODE } } finally { Remove-Item $p -Force -ErrorAction SilentlyContinue }; $env:Path="$HOME\.local\bin;$env:Path"
+```
+
+### Pin the preview source
+
+`BRAINHUB_REF` selects the source fetched after an installer wrapper starts. Setting it
+while downloading the wrapper itself from `main` does not pin that outer wrapper. To
+source-pin a preview, choose a reviewed full commit SHA and use it for both the wrapper
+URL and `BRAINHUB_REF`.
+
+macOS or Linux:
+
+```sh
+(
+  REF=0123456789abcdef0123456789abcdef01234567 # replace with the reviewed commit
+  if [ "${#REF}" -ne 40 ]; then echo "REF must be a full commit SHA" >&2; exit 2; fi
+  case "$REF" in *[!0-9A-Fa-f]*) echo "REF must be a full commit SHA" >&2; exit 2;; esac
+  BRAINHUB_REF="$REF" sh -c 'set -eu; f=$(mktemp); cleanup() { rm -f "$f"; }; trap cleanup EXIT; curl --proto "=https" --tlsv1.2 --max-filesize 1048576 -fsSLo "$f" "https://raw.githubusercontent.com/as791/brain-hub/${BRAINHUB_REF}/scripts/install.sh"; BRAINHUB_REF="$BRAINHUB_REF" sh "$f"'
+) && export PATH="$HOME/.local/bin:$PATH"
+```
+
+Windows PowerShell:
+
+```powershell
+$Ref = "0123456789abcdef0123456789abcdef01234567" # replace with the reviewed commit
+if ($Ref -notmatch "^[0-9A-Fa-f]{40}$") { throw "Ref must be a full commit SHA" }
+$env:BRAINHUB_REF = $Ref
+$p = Join-Path ([IO.Path]::GetTempPath()) ("brainhub-"+[Guid]::NewGuid().ToString("N")+".ps1")
+try {
+    Invoke-WebRequest "https://raw.githubusercontent.com/as791/brain-hub/$Ref/scripts/install.ps1" -MaximumRedirection 0 -OutFile $p
+    if ((Get-Item $p).Length -gt 1MB) { throw "Installer is larger than 1 MB" }
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p
+    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+} finally {
+    Remove-Item $p -Force -ErrorAction SilentlyContinue
+}
+$env:Path="$HOME\.local\bin;$env:Path"
+```
+
+This pins Brain Hub's source and wrapper, but not every installed byte. The installer
+resolves third-party packages from declared version ranges at installation time, so
+package-index state and install time can change the selected dependency versions. The
+preview runtime is source-addressed and Python-compatibility-addressed, not a
+bit-for-bit reproducible artifact. Locked dependencies, signed artifacts, checksums,
+an SBOM, and provenance remain marketplace publication gates.
+
+One run installs and verifies:
+
+- the `brainhub` CLI and bundled interactive web console;
+- `brainhub-adapter` plus Codex, Claude, Cursor, and Antigravity hook commands;
+- an isolated, source-addressed Python runtime that can be upgraded without moving or
+  deleting personal graph data;
+- the Brain Hub plugin marketplace, automatically registered with Codex when its
+  CLI is available;
+- the same absolute local MCP runtime registered with installed Claude Code, Cursor,
+  and Antigravity hosts, without overwriting a pre-existing unrelated entry.
+
+The installer is idempotent, adds its launcher directory to the user `PATH`, and
+keeps the previous runtime available when the source changes. It prefers the operating
+system keychain; on headless systems without one, it creates and pins a private
+per-installation key. Restart any open agent hosts after installation. In Codex,
+review and trust the lifecycle hooks once with `/hooks`. If the command is not visible
+in an already-open terminal, open a new terminal.
+
+Verify the complete installed path:
+
+```sh
+brainhub --help
+brainhub start
+brainhub status
+brainhub search "privacy architecture" --global
+brainhub ui
+```
+
+An empty search result is normal until an agent records work. Stop the background
+service with `brainhub stop`.
+
+## Developer setup
+
+Source contributors additionally need Node.js 20.19+ (or 22.12+):
 
 ```bash
+git clone https://github.com/as791/brain-hub.git
 cd brain-hub
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install '.[dev]' ./adapters
 cp .env.example .env
-set -a
-source .env
-set +a
-brainhub serve --host 127.0.0.1 --port 8420
+cd apps/web && npm install && npm run build && cd ../..
 ```
 
-The sourced example enables bearer authentication. Open the console's connection settings and enter `local-development-only`, or replace it with your own token. In another supervised terminal, continuously drain passive hook events without adding network latency to the agent:
+Continuously drain passive hook events without adding network latency to the agent:
 
 ```bash
 cd brain-hub
@@ -52,15 +144,20 @@ brainhub-adapter watch
 
 The empty `BRAINHUB_DB_PATH` uses Brain Hub's per-user data directory so the HTTP daemon and the plugin's stdio MCP process share one SQLite authority. If you override it, use the same absolute path in every process.
 
-In another terminal:
+The stdio MCP process opens the shared SQLite authority directly and drains passive
+hook events without requiring network ports. Installed users can start and open the
+optional local API and console directly:
 
 ```bash
-cd brain-hub/apps/web
-npm install
-npm run dev
+brainhub ui
 ```
 
-Open the URL printed by Vite. The UI can run against its bundled demonstration graph when the daemon is unavailable; a status badge makes that state explicit.
+The command starts the managed background service if needed, verifies both API and UI
+identities, opens `http://127.0.0.1:4173`, and exits. Use `brainhub start`,
+`brainhub status`, and `brainhub stop` for explicit lifecycle control. Frontend
+contributors can still run `npm install` and `npm run dev` from `apps/web`. The UI can
+run against its bundled demonstration graph when the daemon is unavailable; a status
+badge makes that state explicit.
 
 The main quick start intentionally opens an empty personal graph. To explore seeded data without mixing fake records into that graph, use a disposable database in two terminals:
 
@@ -73,15 +170,18 @@ For an isolated local deployment, set a random 32-byte URL-safe base64 master ke
 
 ## Agent and plugin setup
 
-Install the repository marketplace, then enable the `brain-hub` plugin in Codex:
+The main installer already copies and registers the Codex plugin. Its generated MCP
+configuration points directly to the verified managed runtime, so Codex Desktop does
+not depend on an activated project shell or the terminal `PATH`. Its trusted Codex
+lifecycle hooks capture bounded metadata automatically, while either the plugin MCP
+process or the optional supervised service drains the spool. Review and trust those
+commands once in Codex with `/hooks`.
 
-```bash
-make install-plugin-runtime
-codex plugin marketplace add "$PWD"
-codex plugin add brain-hub@brain-hub
-```
-
-The managed runtime lives at `~/.local/share/brainhub/venv`, so Codex Desktop can start the local MCP process without inheriting an activated project shell. The plugin falls back to a `brainhub` executable on `PATH` for development. It provides an explicit skill for recording, searching, expanding, and correcting graph memory. Passive capture remains opt-in and is supplied by host-specific adapters under `adapters/`; wire the matching documented host hook to its command and supervise `brainhub-adapter watch` as described in the [adapter guide](adapters/README.md). A hook failure never blocks an agent session.
+The plugin also provides an explicit skill for recording, searching, expanding, and
+correcting graph memory. The installer registers its MCP tools with installed Claude
+Code, Cursor, and Antigravity hosts. Their optional passive lifecycle hooks can use the
+matching installed hook command described in the [adapter guide](adapters/README.md).
+A hook failure never blocks an agent session.
 
 ## Default privacy boundary
 

@@ -42,7 +42,7 @@ At-least-once delivery is intentional. `event.id` is the idempotency key; accept
 
 Search is a fusion of lexical/semantic relevance and graph context. Semble receives only a redacted document projection in a temporary directory; Brain Hub does not call Semble's persistence API. The service atomically swaps a completed in-memory index into use. If semantic indexing is unavailable, responses explicitly mark `search_mode=lexical_degraded`.
 
-An anchored query starts with a selected node, filters candidates to its bounded neighborhood, and ranks only that set. The default and maximum unattended depth are two hops. There is no silent global fallback; the client must ask for one.
+An anchored query starts with a selected node, filters candidates to its bounded neighborhood, and ranks only that set. The default depth is two hops; users may explicitly expand it up to 20 hops. Scene node and edge budgets still apply. There is no silent global fallback; the client must ask for one.
 
 NetworkX is used for bounded subgraphs, shortest evidence paths, communities, and offline analysis. It is never serialized as the primary database and never drives browser layout directly.
 

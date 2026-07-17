@@ -15,8 +15,8 @@ export function GraphList({ graph, anchorId, selectedId, onSelect }: GraphListPr
   return (
     <div className="graph-list" role="region" aria-label="Knowledge graph as an accessible list">
       <div className="graph-list__intro">
-        <span>Keyboard view</span>
-        <p>Each node includes its visible connections at the selected time.</p>
+        <span>Top-down hierarchy</span>
+        <p>Nodes are ordered from the current root through each visible child level.</p>
       </div>
       <ol>
         {graph.nodes.map((node) => {
@@ -27,7 +27,10 @@ export function GraphList({ graph, anchorId, selectedId, onSelect }: GraphListPr
                 <span className="node-dot" style={{ '--node-color': KIND_COLORS[node.kind] } as React.CSSProperties} />
                 <span className="graph-list__label">
                   <strong>{node.label}</strong>
-                  <small>{node.kind}{node.id === anchorId ? ' · current anchor' : ''}</small>
+                  <small>
+                    Level {node.hierarchyDepth ?? 0} · {node.kind}
+                    {node.id === anchorId ? ' · current root' : ''}
+                  </small>
                 </span>
                 <span className="graph-list__count">{linked.length}</span>
               </button>

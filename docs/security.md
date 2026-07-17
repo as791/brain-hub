@@ -29,7 +29,20 @@ Agent hosts and adapter processes are untrusted producers. Graph text is untrust
 - SQLite uses WAL and restrictive file permissions.
 - Content fields and blobs use XChaCha20-Poly1305 with a fresh nonce and authenticated record context.
 - The pre-daemon adapter spool contains only redacted metadata and explicitly supplied summaries, is bounded, and uses owner-only permissions. It is not yet application-encrypted, so daily use requires an encrypted home volume; spool encryption is a public-release hardening gate.
-- The master key comes from the OS keychain where available. Environment keys are an explicit deployment override; plaintext key files are not a supported production mode.
+- An explicit `BRAINHUB_MASTER_KEY` remains the highest-priority deployment override. Without it,
+  each installation pins its first successful automatic provider in a private marker: a working OS
+  keychain is preferred, while a headless system with no usable keychain atomically creates one
+  unique 32-byte key in the per-user Brain Hub key directory.
+- The local fallback key, provider marker, and lock files are never logged. On POSIX systems the
+  directory must be owned by the current user with mode `0700`, files must be regular,
+  non-symlink, current-user-owned files with mode `0600`, and insecure state is rejected rather
+  than repaired silently. Platforms without POSIX modes rely on the user-profile filesystem ACL.
+  Full-disk or home-directory encryption remains recommended because this fallback key is protected
+  by the operating-system user boundary rather than a hardware-backed keychain.
+- Provider selection and key creation are serialized and crash-safe. Once keychain or local-file
+  storage is selected, later keychain outages or missing key material fail closed; Brain Hub never
+  silently switches providers or generates a replacement key for an existing installation. Back
+  up the selected local key together with the encrypted database, under equivalent protection.
 - Semble indexes only a redacted temporary projection and must not persist a second content copy.
 - Backups are encrypted and exports clearly separate metadata from content.
 

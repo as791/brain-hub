@@ -46,8 +46,9 @@ or supplied a node, pass it as the anchor and keep the default two-hop boundary.
 silently fall back to a global search. If the bounded search is empty, state that and ask
 before broadening scope.
 
-Use `brainhub.get_node` for the selected node, `brainhub.expand` for its neighborhood, and
-`brainhub.path` to explain how two results are connected. Present edge explanations,
+Use `brainhub.get_node` for the selected node, `brainhub.expand` for its neighborhood
+(up to 20 hops when the user explicitly requests deeper traversal), and `brainhub.path`
+to explain how two results are connected. Present edge explanations,
 confidence, and evidence rather than only node labels.
 
 ## Feedback

@@ -21,10 +21,10 @@ class GraphBoundsError(ValueError):
 
 
 class EvidenceGraph:
-    MAX_HOPS = 2
+    MAX_HOPS = 20
     MAX_SCENE_NODES = 2_000
     MAX_SCENE_EDGES = 10_000
-    MAX_PATH_LENGTH = 12
+    MAX_PATH_LENGTH = 20
 
     def __init__(self, store: EventStore) -> None:
         self.store = store

@@ -67,6 +67,8 @@ export function Graph3D({
       height={height}
       graphData={{ nodes: graph.nodes, links: graph.edges }}
       nodeId="id"
+      dagMode="td"
+      dagLevelDistance={85}
       nodeLabel={(rawNode) => nodeTooltip(rawNode as BrainNode)}
       nodeColor={(rawNode) => {
         const node = rawNode as BrainNode

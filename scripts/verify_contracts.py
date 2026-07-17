@@ -16,7 +16,10 @@ from jsonschema import Draft202012Validator
 ROOT = Path(__file__).resolve().parents[1]
 PLUGIN = ROOT / "plugins" / "brain-hub"
 MARKETPLACE = ROOT / ".agents" / "plugins" / "marketplace.json"
-SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?$")
+SEMVER = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$"
+)
 
 
 def load_json(path: Path) -> object:
@@ -72,7 +75,21 @@ def verify_plugin() -> None:
 
     serialized = json.dumps(manifest)
     require("[TODO:" not in serialized, "plugin manifest contains a TODO placeholder")
-    require("hooks" not in manifest, "hooks is not accepted by the current plugin validator")
+    hooks = load_json(PLUGIN / "hooks" / "hooks.json")
+    require(isinstance(hooks, dict), "plugin hooks must be an object")
+    hook_events = hooks.get("hooks") or {}
+    required_events = {
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "PreCompact",
+        "PostCompact",
+        "SubagentStart",
+        "SubagentStop",
+        "Stop",
+    }
+    require(required_events <= hook_events.keys(), "plugin lifecycle hooks are incomplete")
 
     marketplace = load_json(MARKETPLACE)
     require(isinstance(marketplace, dict), "marketplace must be an object")

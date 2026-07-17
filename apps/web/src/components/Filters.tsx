@@ -67,7 +67,7 @@ export function Filters({
 
       <div className="filter-note">
         <span className="filter-note__mark">↳</span>
-        <p>Search never escapes the selected anchor and hop boundary.</p>
+          <p>Search follows directed child links from the current hierarchy root.</p>
       </div>
     </aside>
   )

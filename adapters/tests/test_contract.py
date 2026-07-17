@@ -24,6 +24,30 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(first.type, "com.brainhub.agent.run.completed.v1")
         self.assertRegex(first.type, r"^com\.brainhub\.[a-z0-9.]+\.v[1-9][0-9]*$")
 
+    def test_lifecycle_phases_with_one_invocation_have_distinct_ids(self) -> None:
+        common = {
+            "session_id": "session-1",
+            "invocation_id": "invocation-1",
+            "tool_name": "apply_patch",
+        }
+        before = normalize_capture(
+            "codex",
+            {**common, "hook_event_name": "PreToolUse"},
+        )
+        after = normalize_capture(
+            "codex",
+            {**common, "hook_event_name": "PostToolUse"},
+        )
+
+        self.assertNotEqual(before.id, after.id)
+        self.assertEqual(
+            before.id,
+            normalize_capture(
+                "codex",
+                {**common, "hook_event_name": "PreToolUse"},
+            ).id,
+        )
+
     def test_invalid_host_time_uses_stable_unknown_sentinel(self) -> None:
         payload = self.fixture("cursor/stop.json")
         payload["timestamp"] = "not-a-date"
@@ -70,8 +94,7 @@ class ContractTests(unittest.TestCase):
         samples = (
             "AWS " + "AKIA" + "ABCDEFGHIJKLMNOP was rotated",
             "session " + "eyJ" + "abcdefghijk.abcdefghijk.abcdefghij expired",
-            "-----BEGIN "
-            + "PRIVATE KEY-----\nsecret-material\n-----END PRIVATE KEY-----",
+            "-----BEGIN " + "PRIVATE KEY-----\nsecret-material\n-----END PRIVATE KEY-----",
             "api_" + "key=plain-development-secret",
         )
         for index, summary in enumerate(samples):

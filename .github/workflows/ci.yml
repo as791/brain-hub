@@ -18,9 +18,9 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -40,7 +40,7 @@ jobs:
       - name: Verify schemas and plugin package
         run: python scripts/verify_contracts.py
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -54,6 +54,9 @@ jobs:
         run: npm test && npm run lint && npm run build && npm audit --audit-level=high
         working-directory: apps/web
 
+      - name: Verify committed web bundle is current
+        run: git diff --exit-code -- packages/core/src/brainhub/web_dist
+
   cloud-schema:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -61,7 +64,7 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Start pinned Apache AGE schema
         run: docker compose -f cloud/docker-compose.yml up -d --wait
@@ -72,3 +75,164 @@ jobs:
       - name: Stop cloud fixture
         if: always()
         run: docker compose -f cloud/docker-compose.yml down -v
+
+  install-smoke:
+    name: Install smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            adapters/pyproject.toml
+
+      - name: Parse PowerShell installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts/install.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+
+      - name: Exercise pinned remote bootstrap (macOS/Linux)
+        if: runner.os != 'Windows' && github.event_name == 'push' && github.repository == 'as791/brain-hub'
+        shell: bash
+        env:
+          BRAINHUB_REF: ${{ github.sha }}
+        run: |
+          cp scripts/install.sh "$RUNNER_TEMP/brainhub-remote-install.sh"
+          sh "$RUNNER_TEMP/brainhub-remote-install.sh" \
+            --install-root "$RUNNER_TEMP/Remote Brain Hub State" \
+            --bin-dir "$RUNNER_TEMP/Remote Brain Hub Bin" \
+            --no-modify-path \
+            --dry-run
+
+      - name: Exercise pinned remote bootstrap (Windows)
+        if: runner.os == 'Windows' && github.event_name == 'push' && github.repository == 'as791/brain-hub'
+        shell: powershell
+        env:
+          BRAINHUB_REF: ${{ github.sha }}
+        run: |
+          $remoteInstaller = "$env:RUNNER_TEMP\brainhub-remote-install.ps1"
+          Copy-Item scripts/install.ps1 $remoteInstaller
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File $remoteInstaller `
+            --install-root "$env:RUNNER_TEMP\Remote Brain Hub State" `
+            --bin-dir "$env:RUNNER_TEMP\Remote Brain Hub Bin" `
+            --no-modify-path `
+            --dry-run
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Install CLI, adapters, UI, and plugin (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          sh scripts/install.sh \
+            --install-root "$RUNNER_TEMP/Brain Hub State" \
+            --bin-dir "$RUNNER_TEMP/Brain Hub Bin" \
+            --no-modify-path
+
+      - name: Install CLI, adapters, UI, and plugin (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 `
+            --install-root "$env:RUNNER_TEMP\Brain Hub State" `
+            --bin-dir "$env:RUNNER_TEMP\Brain Hub Bin" `
+            --no-modify-path
+
+      - name: Exercise installed product (macOS/Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          BRAINHUB_SEMANTIC: "false"
+        run: |
+          export BRAINHUB_DB_PATH="$RUNNER_TEMP/brainhub-smoke.db"
+          brainhub="$RUNNER_TEMP/Brain Hub Bin/brainhub"
+          "$brainhub" --help
+          "$brainhub" demo --reset
+          "$brainhub" search "privacy architecture" --global
+          "$brainhub" start
+          "$brainhub" start
+          "$brainhub" status
+          python -c 'import re, urllib.request; base="http://127.0.0.1:4173"; html=urllib.request.urlopen(base+"/", timeout=2).read().decode(); assets=set(re.findall(r"(?:src|href)=\"(/assets/[^\"]+)\"", html)); assert assets; [urllib.request.urlopen(base+asset, timeout=2).read(1) for asset in assets]'
+          "$brainhub" stop
+          "$brainhub" stop
+          test -f "$RUNNER_TEMP/Brain Hub State/runtime/current.json"
+          test -f "$RUNNER_TEMP/Brain Hub State/marketplace/plugins/brain-hub/.mcp.json"
+          python -c 'import json, pathlib, sys; root=pathlib.Path(sys.argv[1]); mcp=json.loads((root/".mcp.json").read_text()); assert pathlib.Path(mcp["mcpServers"]["brain-hub"]["command"]).is_absolute(); hooks=json.loads((root/"hooks"/"hooks.json").read_text()); command=hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"]; assert "/venv/bin/python" in command; manifest=json.loads((root/".codex-plugin"/"plugin.json").read_text()); assert "+codex.src-" in manifest["version"]; marketplace=json.loads((root.parents[1]/".agents"/"plugins"/"marketplace.json").read_text()); assert marketplace["name"] == "brain-hub-managed"' "$RUNNER_TEMP/Brain Hub State/marketplace/plugins/brain-hub"
+          test -n "$(find "$HOME/.local/share/brainhub/keys" -name '*.provider' -print -quit)"
+
+      - name: Exercise installed product (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          BRAINHUB_SEMANTIC: "false"
+        run: |
+          $env:BRAINHUB_DB_PATH = "$env:RUNNER_TEMP\brainhub-smoke.db"
+          $brainhub = "$env:RUNNER_TEMP\Brain Hub Bin\brainhub.cmd"
+          & $brainhub --help
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub demo --reset
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub search "privacy architecture" --global
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub start
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub start
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub status
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python -c 'import re, urllib.request; base="http://127.0.0.1:4173"; html=urllib.request.urlopen(base+"/", timeout=2).read().decode(); assets=set(re.findall(r"(?:src|href)=\"(/assets/[^\"]+)\"", html)); assert assets; [urllib.request.urlopen(base+asset, timeout=2).read(1) for asset in assets]'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub stop
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & $brainhub stop
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (-not (Test-Path "$env:RUNNER_TEMP\Brain Hub State\runtime\current.json")) {
+            throw "active runtime pointer is missing"
+          }
+          $plugin = "$env:RUNNER_TEMP\Brain Hub State\marketplace\plugins\brain-hub"
+          if (-not (Test-Path "$plugin\.mcp.json")) {
+            throw "installed plugin configuration is missing"
+          }
+          $mcp = Get-Content "$plugin\.mcp.json" -Raw | ConvertFrom-Json
+          if (-not [IO.Path]::IsPathRooted($mcp.mcpServers.'brain-hub'.command)) {
+            throw "installed MCP command is not absolute"
+          }
+          $hooks = Get-Content "$plugin\hooks\hooks.json" -Raw | ConvertFrom-Json
+          $hookCommand = $hooks.hooks.SessionStart[0].hooks[0].commandWindows
+          $encodedHook = ($hookCommand -split " ")[-1]
+          $decodedHook = [Text.Encoding]::Unicode.GetString(
+            [Convert]::FromBase64String($encodedHook)
+          )
+          if ($decodedHook -notmatch [regex]::Escape("\venv\Scripts\python.exe")) {
+            throw "installed hook does not use the managed Windows Python"
+          }
+          $manifest = Get-Content "$plugin\.codex-plugin\plugin.json" -Raw | ConvertFrom-Json
+          if ($manifest.version -notmatch "\+codex\.src-") {
+            throw "installed plugin manifest has no source cachebuster"
+          }
+          $marketplace = Get-Content "$env:RUNNER_TEMP\Brain Hub State\marketplace\.agents\plugins\marketplace.json" -Raw | ConvertFrom-Json
+          if ($marketplace.name -ne "brain-hub-managed") {
+            throw "installed managed marketplace has the wrong identity"
+          }
+          if (-not (Get-ChildItem "$HOME\.local\share\brainhub\keys" -Filter "*.provider")) {
+            throw "automatic key provider choice was not persisted"
+          }

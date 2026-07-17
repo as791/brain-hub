@@ -16,11 +16,14 @@ class PluginPackageTests(unittest.TestCase):
         self.assertEqual(manifest["name"], "brain-hub")
         self.assertNotIn("hooks", manifest)
         self.assertNotIn("apps", manifest)
+        hooks = json.loads((root / "hooks" / "hooks.json").read_text())["hooks"]
+        self.assertIn("PreToolUse", hooks)
+        self.assertIn("PostToolUse", hooks)
+        self.assertIn("SessionStart", hooks)
+        self.assertIn("Stop", hooks)
         server = mcp["mcpServers"]["brain-hub"]
-        self.assertEqual(server["command"], "/bin/sh")
-        self.assertEqual(server["args"][0], "-c")
-        self.assertIn(".local/share/brainhub/venv/bin/brainhub", server["args"][1])
-        self.assertIn("exec brainhub mcp", server["args"][1])
+        self.assertEqual(server["command"], "brainhub")
+        self.assertEqual(server["args"], ["_plugin-mcp"])
         self.assertNotIn("url", server)
 
     def test_repo_marketplace_policy_is_complete(self) -> None:

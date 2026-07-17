@@ -7,6 +7,7 @@ from typing import Annotated
 from pydantic import AwareDatetime, Field
 
 from . import __version__
+from .graph import EvidenceGraph
 from .models import (
     BrainEvent,
     FeedbackRequest,
@@ -76,7 +77,7 @@ def create_mcp_server(service: BrainHubService):
         title="Search Brain Hub",
         description=(
             "Hybrid semantic/lexical search. Pass anchor_id with scope='anchored' for a strict "
-            "zero-to-two-hop search; global scope must be explicit."
+            "zero-to-20-hop search; global scope must be explicit."
         ),
         annotations=read_only,
         structured_output=True,
@@ -84,7 +85,7 @@ def create_mcp_server(service: BrainHubService):
     def search(
         query: Annotated[str, Field(min_length=1, max_length=1000)],
         anchor_id: Annotated[str | None, Field(max_length=256)] = None,
-        hops: Annotated[int, Field(ge=0, le=2)] = 2,
+        hops: Annotated[int, Field(ge=0, le=EvidenceGraph.MAX_HOPS)] = 2,
         limit: Annotated[int, Field(ge=1, le=100)] = 20,
         scope: Annotated[str, Field(pattern="^(anchored|global)$")] = "anchored",
         valid_at: AwareDatetime | None = None,
@@ -118,13 +119,13 @@ def create_mcp_server(service: BrainHubService):
     @server.tool(
         name="brainhub.expand",
         title="Expand a Brain Hub neighborhood",
-        description="Return the bounded evidence-visible graph within zero to two hops of a node.",
+        description="Return the bounded evidence-visible graph within zero to 20 hops of a node.",
         annotations=read_only,
         structured_output=True,
     )
     def expand(
         node_id: Annotated[str, Field(min_length=3, max_length=256)],
-        hops: Annotated[int, Field(ge=0, le=2)] = 1,
+        hops: Annotated[int, Field(ge=0, le=EvidenceGraph.MAX_HOPS)] = 1,
         relation_types: list[str] | None = None,
         node_limit: Annotated[int, Field(ge=1, le=2000)] = 2000,
         edge_limit: Annotated[int, Field(ge=0, le=10000)] = 10000,
@@ -150,7 +151,7 @@ def create_mcp_server(service: BrainHubService):
         source_id: Annotated[str, Field(min_length=3, max_length=256)],
         target_id: Annotated[str, Field(min_length=3, max_length=256)],
         directed: bool = False,
-        max_length: Annotated[int, Field(ge=1, le=12)] = 8,
+        max_length: Annotated[int, Field(ge=1, le=EvidenceGraph.MAX_PATH_LENGTH)] = 8,
         valid_at: AwareDatetime | None = None,
     ) -> PathResponse:
         return service.path(

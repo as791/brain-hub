@@ -36,6 +36,7 @@ brainhub = "brainhub.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["packages/core/src/brainhub"]
+artifacts = ["packages/core/src/brainhub/web_dist/**"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

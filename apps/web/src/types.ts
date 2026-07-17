@@ -55,6 +55,7 @@ export interface BrainNode {
   vx?: number
   vy?: number
   vz?: number
+  hierarchyDepth?: number
 }
 
 /** The renderer may replace endpoint ids with node objects at runtime. */

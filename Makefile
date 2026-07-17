@@ -1,4 +1,4 @@
-.PHONY: install install-plugin-runtime dev api web test test-backend test-web lint validate-plugin demo clean
+.PHONY: install install-user install-plugin-runtime dev api web test test-backend test-web lint validate-plugin demo clean
 
 PLUGIN_RUNTIME_DIR ?= $(HOME)/.local/share/brainhub/venv
 
@@ -6,6 +6,9 @@ install:
 	python3 -m pip install '.[dev]' ./adapters
 	python3 -m pip install --force-reinstall --no-deps . ./adapters
 	cd apps/web && npm install
+
+install-user:
+	python3 scripts/install.py --source .
 
 install-plugin-runtime:
 	python3 -m venv "$(PLUGIN_RUNTIME_DIR)"

@@ -4,24 +4,43 @@ from __future__ import annotations
 
 import asyncio
 import hmac
-from dataclasses import dataclass
+import ipaddress
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
-from .graph import GraphBoundsError, GraphNotFoundError
+from .graph import EvidenceGraph, GraphBoundsError, GraphNotFoundError
 from .models import BrainEvent, FeedbackRequest, NodeType
 from .policy import CapturePolicyError
 from .service import BrainHubService
 from .store import EventIntegrityError, ProjectionIntegrityError
 
 
+PRODUCT_ID = "brainhub"
+PRODUCT_VERSION = "0.1.0"
+
+
 @dataclass(slots=True)
 class ApiSettings:
     token: str | None = None
+    instance_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    control_token: str | None = None
+    shutdown_callback: Callable[[], None] | None = None
     max_content_length: int = 2 * 1024 * 1024
     websocket_poll_interval_seconds: float = 1.0
     allowed_origins: tuple[str, ...] = (
@@ -50,7 +69,7 @@ class SearchRequest(BaseModel):
 
     query: str = Field(min_length=1, max_length=1000)
     anchor_id: str | None = Field(default=None, max_length=256)
-    hops: int = Field(default=2, ge=0, le=2)
+    hops: int = Field(default=2, ge=0, le=EvidenceGraph.MAX_HOPS)
     limit: int = Field(default=20, ge=1, le=100)
     scope: Literal["anchored", "global"] = "anchored"
     valid_at: AwareDatetime | None = None
@@ -63,7 +82,7 @@ class PathRequest(BaseModel):
     source_id: str = Field(min_length=3, max_length=256)
     target_id: str = Field(min_length=3, max_length=256)
     directed: bool = False
-    max_length: int = Field(default=8, ge=1, le=12)
+    max_length: int = Field(default=8, ge=1, le=EvidenceGraph.MAX_PATH_LENGTH)
     valid_at: AwareDatetime | None = None
 
 
@@ -81,6 +100,15 @@ def _authorized(value: str | None, expected: str | None) -> bool:
     return hmac.compare_digest(value.removeprefix("Bearer "), expected)
 
 
+def _is_loopback(request: Request) -> bool:
+    if request.client is None:
+        return False
+    try:
+        return ipaddress.ip_address(request.client.host).is_loopback
+    except ValueError:
+        return request.client.host.casefold() == "localhost"
+
+
 def create_app(
     service: BrainHubService,
     *,
@@ -89,7 +117,7 @@ def create_app(
     config = settings or ApiSettings()
     app = FastAPI(
         title="Brain Hub",
-        version="0.1.0",
+        version=PRODUCT_VERSION,
         description="Local-first evidence-backed memory graph for AI agents.",
     )
     app.state.brainhub = service
@@ -98,7 +126,12 @@ def create_app(
         allow_origins=list(config.allowed_origins),
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Idempotency-Key",
+            "X-BrainHub-Control",
+        ],
     )
 
     @app.middleware("http")
@@ -122,7 +155,10 @@ def create_app(
                         status_code=413, content={"detail": "request body is too large"}
                     )
             request._body = bytes(body)
-        if request.method == "OPTIONS" or request.url.path == "/healthz":
+        if request.method == "OPTIONS" or request.url.path in {
+            "/healthz",
+            "/_brainhub/control/shutdown",
+        }:
             return await call_next(request)
         if not _authorized(request.headers.get("authorization"), config.token):
             return JSONResponse(status_code=401, content={"detail": "invalid bearer token"})
@@ -150,7 +186,36 @@ def create_app(
 
     @app.get("/healthz")
     def health() -> dict[str, object]:
-        return {"status": "ok", "version": "0.1.0"}
+        return {
+            "instance_id": config.instance_id,
+            "product": PRODUCT_ID,
+            "status": "ok",
+            "version": PRODUCT_VERSION,
+        }
+
+    @app.post("/_brainhub/control/shutdown", include_in_schema=False, status_code=202)
+    def controlled_shutdown(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        supplied_token: Annotated[
+            str | None,
+            Header(alias="X-BrainHub-Control"),
+        ] = None,
+    ) -> dict[str, object]:
+        if (
+            not _is_loopback(request)
+            or config.control_token is None
+            or supplied_token is None
+            or not hmac.compare_digest(supplied_token, config.control_token)
+            or config.shutdown_callback is None
+        ):
+            raise HTTPException(status_code=403, detail="control request denied")
+        background_tasks.add_task(config.shutdown_callback)
+        return {
+            "instance_id": config.instance_id,
+            "product": PRODUCT_ID,
+            "status": "stopping",
+        }
 
     @app.post("/v1/events")
     def record_event(
@@ -196,7 +261,7 @@ def create_app(
     def search_get(
         query: Annotated[str, Query(min_length=1, max_length=1000)],
         anchor_id: Annotated[str | None, Query(max_length=256)] = None,
-        hops: Annotated[int, Query(ge=0, le=2)] = 2,
+        hops: Annotated[int, Query(ge=0, le=EvidenceGraph.MAX_HOPS)] = 2,
         limit: Annotated[int, Query(ge=1, le=100)] = 20,
         scope: Literal["anchored", "global"] = "anchored",
         valid_at: AwareDatetime | None = None,
@@ -224,7 +289,7 @@ def create_app(
     @app.get("/v1/nodes/{node_id}/expand")
     def expand_node(
         node_id: str,
-        hops: Annotated[int, Query(ge=0, le=2)] = 1,
+        hops: Annotated[int, Query(ge=0, le=EvidenceGraph.MAX_HOPS)] = 1,
         relation: Annotated[list[str] | None, Query()] = None,
         node_limit: Annotated[int, Query(ge=1, le=2_000)] = 2_000,
         edge_limit: Annotated[int, Query(ge=0, le=10_000)] = 10_000,

@@ -8,6 +8,8 @@ import type {
   SearchHit,
 } from '../types'
 
+export const MAX_GRAPH_HOPS = 20
+
 export const KIND_COLORS: Record<NodeKind, string> = {
   Workstream: '#56e4ff',
   Run: '#58a6ff',
@@ -84,6 +86,61 @@ export function boundedSubgraph(
       (edge) => ids.has(endpointId(edge.source)) && ids.has(endpointId(edge.target)),
     ),
   }
+}
+
+export function topDownSubgraph(
+  snapshot: GraphSnapshot,
+  rootId: string,
+  depthLimit: number,
+): GraphSnapshot {
+  const nodeById = new Map(snapshot.nodes.map((node) => [node.id, node]))
+  if (!nodeById.has(rootId)) return { ...snapshot, nodes: [], edges: [] }
+
+  const depth = new Map<string, number>([[rootId, 0]])
+  const treeEdges: BrainEdge[] = []
+  let frontier = [rootId]
+  for (let level = 1; level <= depthLimit && frontier.length > 0; level += 1) {
+    const next: string[] = []
+    for (const parentId of frontier) {
+      for (const edge of snapshot.edges) {
+        if (endpointId(edge.source) !== parentId) continue
+        const childId = endpointId(edge.target)
+        if (!nodeById.has(childId) || depth.has(childId)) continue
+        depth.set(childId, level)
+        treeEdges.push(edge)
+        next.push(childId)
+      }
+    }
+    frontier = next
+  }
+
+  return {
+    ...snapshot,
+    anchorId: rootId,
+    nodes: [...depth].map(([id, hierarchyDepth]) => ({
+      ...nodeById.get(id)!,
+      hierarchyDepth,
+    })),
+    edges: treeEdges,
+  }
+}
+
+export function topDownPath(
+  snapshot: GraphSnapshot,
+  sourceId: string,
+  targetId: string,
+  depthLimit: number,
+): string[] | null {
+  const tree = topDownSubgraph(snapshot, sourceId, depthLimit)
+  if (!tree.nodes.some((node) => node.id === targetId)) return null
+  const parent = new Map(tree.edges.map((edge) => [endpointId(edge.target), endpointId(edge.source)]))
+  const path = [targetId]
+  while (path[0] !== sourceId) {
+    const parentId = parent.get(path[0])
+    if (!parentId) return null
+    path.unshift(parentId)
+  }
+  return path
 }
 
 export function graphDistance(snapshot: GraphSnapshot, anchorId: string): Map<string, number> {

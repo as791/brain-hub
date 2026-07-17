@@ -217,7 +217,7 @@ def normalize_capture(
         data["metadata"] = metadata
 
     event_key_raw = _first(payload, "event_id", "hook_id", "invocation_id", "turn_id")
-    event_key = str(event_key_raw) if event_key_raw is not None else None
+    event_key = f"{event_name}:{event_key_raw}" if event_key_raw is not None else None
     event_type = f"com.brainhub.agent.run.{status}.v1"
     return make_event(
         source=f"brainhub-adapter://{profile.product}/{source_surface}",

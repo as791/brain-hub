@@ -3,14 +3,25 @@
 This plugin exposes the local `brainhub mcp` stdio server and teaches Codex how to record
 and retrieve evidence-backed workstream memory safely.
 
+When Codex activates the plugin, its MCP launcher opens the shared encrypted SQLite
+authority directly and drains passive hook events without claiming HTTP ports. Users
+do not need Node/npm or a separate watcher. Use `brainhub ui` to start and open the
+optional console, `brainhub status` to inspect it, and `brainhub stop` to stop it.
+
 ## Local install contract
 
-From the Brain Hub repository, run `make install-plugin-runtime` before adding the
-marketplace. This creates a stable runtime at `~/.local/share/brainhub/venv`; the launcher
-also falls back to a `brainhub` executable on `PATH` for development. The stdio MCP process
-opens the shared SQLite authority directly; start the daemon at `127.0.0.1:8420` as well
-when using the web console or passive adapter delivery. The plugin itself has no remote
-credentials; the local process owns encryption keys and data access.
+Use the macOS/Linux or Windows one-command installer in the repository README. It
+creates an isolated runtime keyed by the Brain Hub source fingerprint and Python
+compatibility, generates an absolute MCP executable path in the installed plugin copy,
+registers the marketplace and plugin when the Codex CLI is available, and installs
+every adapter command. Third-party packages resolve from declared version ranges at
+installation time, so the preview runtime is source-addressed rather than a
+bit-for-bit reproducible artifact. No separate `make`, `pip`, Node, or npm step is
+required. Restart Codex after installation.
+
+The installed manifest gets a deterministic source cachebuster so an upgrade refreshes
+Codex's plugin cache and absolute MCP path. The plugin itself has no remote credentials;
+the local process owns encryption keys and data access.
 
 Run the read-only prerequisite check with:
 
@@ -18,9 +29,18 @@ Run the read-only prerequisite check with:
 python scripts/preflight.py
 ```
 
-The manifest intentionally has no `hooks` field: it is not accepted by current Codex
-plugin validation. Agent capture is supplied by the separately versioned adapters, so a
-missing Brain Hub service cannot interrupt Codex.
+The plugin bundles Codex lifecycle hooks at the standard auto-discovered
+`hooks/hooks.json` path for session start/stop, prompt submission,
+tool pre/post events, compaction, and subagent start/stop. The launcher accepts only
+bounded scalar metadata; prompts, transcripts, messages, tool inputs/outputs, and
+credentials are discarded, and the adapter pseudonymizes workspace paths before
+writing the bounded local spool. The stdio MCP process or the optional supervised Brain
+Hub service drains that spool in the background. Hook failures are fail-open and cannot
+interrupt Codex.
+
+On the first activation, review and trust the Brain Hub hooks in Codex with `/hooks`.
+This is Codex's one-time safety boundary for plugin-provided commands; no separate
+watcher, API, web, Node, or npm command is required for MCP and capture.
 
 ## Publication boundary
 

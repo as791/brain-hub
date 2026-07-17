@@ -6,6 +6,18 @@ The console renders a bounded projection of Brain Hub as either a WebGL 3D graph
 
 Requires Node 20.19+ (or 22.12+).
 
+Installed users should run:
+
+```bash
+brainhub ui
+```
+
+The plugin MCP process works directly against the shared local database and does not
+require an HTTP sidecar. The command above starts the optional managed service if
+needed, verifies it, opens the browser, and exits.
+
+The npm workflow below is only for frontend development:
+
 ```bash
 npm install
 npm run dev
@@ -26,8 +38,14 @@ For runtime authentication, use the connection settings in the header. The token
 
 ## Interaction contract
 
-- Search is always anchored and has a strict one-to-three-hop boundary. There is no silent global fallback.
-- Clicking a node opens evidence, provenance, confidence, valid time, and visible relationships. “Start searches here” makes it the next anchor.
+- Search is always rooted in a directed source-to-target child hierarchy with an explicit
+  depth from one to 20. There is no silent global fallback.
+- Clicking a node immediately drills into its child hierarchy. Breadcrumbs retain the
+  complete route from the original root and let the user move back up.
+- The visible hierarchy is a cycle-safe breadth-first spanning tree. Cross-links and
+  incoming relationships remain available in node details without distorting depth.
+- Depth controls expand or collapse one level at a time, and the 2D/3D renderers place
+  each level in a top-down DAG layout.
 - “Explain path” highlights the evidence path from the current anchor and shows its confidence floor.
 - The renderer caps a scene at 2,000 nodes and 10,000 edges. The daemon should cluster or page larger projections.
 - WebGL failure switches to 2D. The List view is available at all times and supports keyboard navigation.

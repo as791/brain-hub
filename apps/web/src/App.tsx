@@ -15,7 +15,10 @@ import {
   graphTimeBounds,
   KIND_COLORS,
   localSearch,
+  MAX_GRAPH_HOPS,
   shortestPath,
+  topDownPath,
+  topDownSubgraph,
 } from './lib/graph'
 import type {
   BrainNode,
@@ -47,6 +50,9 @@ function App() {
   const [tokenDraft, setTokenDraft] = useState('')
   const [tokenRevision, setTokenRevision] = useState(0)
   const [anchorId, setAnchorId] = useState(demoGraph.anchorId ?? demoGraph.nodes[0].id)
+  const [navigationPath, setNavigationPath] = useState<string[]>([
+    demoGraph.anchorId ?? demoGraph.nodes[0].id,
+  ])
   const [selectedId, setSelectedId] = useState<string>()
   const [query, setQuery] = useState('')
   const [hops, setHops] = useState(2)
@@ -65,9 +71,17 @@ function App() {
     setSourceGraph(graph)
     setSearchGraph(null)
     setHits([])
+    const fallbackAnchor = graph.anchorId
+      ?? graph.nodes.find((node) => node.kind === 'Workstream')?.id
+      ?? graph.nodes[0]?.id
+      ?? ''
     setAnchorId((current) => graph.nodes.some((node) => node.id === current)
       ? current
-      : graph.anchorId ?? graph.nodes.find((node) => node.kind === 'Workstream')?.id ?? graph.nodes[0]?.id ?? '')
+      : fallbackAnchor)
+    setNavigationPath((path) => {
+      const validPath = path.filter((id) => graph.nodes.some((node) => node.id === id))
+      return validPath.length ? validPath : fallbackAnchor ? [fallbackAnchor] : []
+    })
     setValidAt(graphTimeBounds(graph).max)
     return graph
   }, [])
@@ -168,7 +182,7 @@ function App() {
     return { ...timeGraph, nodes, edges }
   }, [anchorId, hiddenConfidence, hiddenKinds, timeGraph])
   const neighborhood = useMemo(
-    () => searchGraph ?? boundedSubgraph(filteredGraph, anchorId, hops),
+    () => searchGraph ?? topDownSubgraph(filteredGraph, anchorId, hops),
     [anchorId, filteredGraph, hops, searchGraph],
   )
   const visibleGraph = useMemo(
@@ -204,12 +218,16 @@ function App() {
         })
         // The REST response ranks nodes; keep the complete strict neighborhood
         // visible so intermediate evidence paths are never dropped from context.
-        setSearchGraph(boundedSubgraph(filteredGraph, anchorId, hops))
-        setHits(response.hits)
+        const projection = topDownSubgraph(filteredGraph, anchorId, hops)
+        const visibleIds = new Set(projection.nodes.map((node) => node.id))
+        setSearchGraph(projection)
+        setHits(response.hits.filter((hit) => visibleIds.has(hit.node.id)))
       } else {
         const result = localSearch(filteredGraph, query, anchorId, hops)
-        setSearchGraph(result.graph)
-        setHits(result.hits.slice(0, 80))
+        const projection = topDownSubgraph(filteredGraph, anchorId, hops)
+        const visibleIds = new Set(projection.nodes.map((node) => node.id))
+        setSearchGraph(projection)
+        setHits(result.hits.filter((hit) => visibleIds.has(hit.node.id)).slice(0, 80))
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Search failed.')
@@ -218,12 +236,25 @@ function App() {
     }
   }
 
-  const makeAnchor = (node: BrainNode) => {
+  const navigateToNode = (node: BrainNode) => {
+    const segment = topDownPath(filteredGraph, anchorId, node.id, hops)
     setAnchorId(node.id)
     setSelectedId(node.id)
+    setNavigationPath((current) => {
+      const existing = current.indexOf(node.id)
+      if (existing >= 0) return current.slice(0, existing + 1)
+      return segment ? [...current, ...segment.slice(1)] : [node.id]
+    })
     setQuery('')
     clearSearchProjection()
-    searchRef.current?.focus()
+  }
+
+  const navigateBreadcrumb = (nodeId: string, index: number) => {
+    setAnchorId(nodeId)
+    setSelectedId(nodeId)
+    setNavigationPath((current) => current.slice(0, index + 1))
+    setQuery('')
+    clearSearchProjection()
   }
 
   const explainPath = async (node: BrainNode) => {
@@ -403,18 +434,51 @@ function App() {
               </div>
             </div>
             <label className="hop-control">
-              <span>Strict radius</span>
+              <button
+                type="button"
+                aria-label="Collapse one hierarchy level"
+                disabled={hops <= 1}
+                onClick={() => changeHops(Math.max(1, hops - 1))}
+              >−</button>
+              <span>Visible depth</span>
               <select value={hops} onChange={(event) => changeHops(Number(event.currentTarget.value))}>
-                <option value={1}>1 hop</option>
-                <option value={2}>2 hops</option>
+                {Array.from({ length: MAX_GRAPH_HOPS }, (_, index) => index + 1).map((depth) => (
+                  <option key={depth} value={depth}>{depth} hop{depth === 1 ? '' : 's'}</option>
+                ))}
               </select>
+              <button
+                type="button"
+                aria-label="Expand one hierarchy level"
+                disabled={hops >= MAX_GRAPH_HOPS}
+                onClick={() => changeHops(Math.min(MAX_GRAPH_HOPS, hops + 1))}
+              >+</button>
             </label>
           </div>
+
+          <nav className="graph-breadcrumbs" aria-label="Hierarchy path">
+            {navigationPath.map((nodeId, index) => {
+              const node = sourceGraph.nodes.find((candidate) => candidate.id === nodeId)
+              if (!node) return null
+              const current = index === navigationPath.length - 1
+              return (
+                <span key={`${nodeId}-${index}`}>
+                  {index > 0 && <span aria-hidden="true">→</span>}
+                  <button
+                    type="button"
+                    aria-current={current ? 'page' : undefined}
+                    onClick={() => navigateBreadcrumb(nodeId, index)}
+                  >
+                    {node.label}
+                  </button>
+                </span>
+              )
+            })}
+          </nav>
 
           <div className="graph-meta" aria-live="polite">
             <div><strong>{visibleGraph.nodes.length}</strong><span>nodes</span></div>
             <div><strong>{visibleGraph.edges.length}</strong><span>edges</span></div>
-            <div className="strict-badge"><span>⊙</span> anchored · no global fallback</div>
+            <div className="strict-badge"><span>↓</span> top-down · directed children</div>
             {visibleGraph.truncated && <div className="budget-badge">Scene budget applied</div>}
             {reducedMotion && <div className="budget-badge">Reduced motion</div>}
           </div>
@@ -428,7 +492,7 @@ function App() {
               <ol>
                 {hits.slice(0, 8).map((hit) => (
                   <li key={hit.node.id}>
-                    <button type="button" onClick={() => setSelectedId(hit.node.id)}>
+                    <button type="button" onClick={() => navigateToNode(hit.node)}>
                       <span className="node-dot" style={{ '--node-color': KIND_COLORS[hit.node.kind] } as React.CSSProperties} />
                       <span><strong>{hit.node.label}</strong><small>{hit.reasons.join(' · ')}</small></span>
                       <em aria-label={`Relevance score ${Math.round(hit.score * 100)} percent`}>
@@ -449,7 +513,7 @@ function App() {
               selectedId={selectedId}
               pathEdgeIds={pathEdgeIds}
               reducedMotion={reducedMotion}
-              onSelect={(node) => setSelectedId(node.id)}
+              onSelect={navigateToNode}
               onBackgroundClick={() => {
                 setSelectedId(undefined)
                 setPath(null)
@@ -483,12 +547,9 @@ function App() {
             setSelectedId(undefined)
             setPath(null)
           }}
-          onMakeAnchor={makeAnchor}
+          onMakeAnchor={navigateToNode}
           onExplainPath={explainPath}
-          onSelect={(node) => {
-            setSelectedId(node.id)
-            setPath(null)
-          }}
+          onSelect={navigateToNode}
         />
       </main>
 

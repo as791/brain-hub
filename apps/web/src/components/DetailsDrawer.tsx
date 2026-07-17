@@ -98,7 +98,7 @@ export function DetailsDrawer({
 
       <div className="drawer-actions">
         <button type="button" className="primary-button" onClick={() => onMakeAnchor(node)} disabled={isAnchor}>
-          {isAnchor ? 'Current search anchor' : 'Start searches here'}
+          {isAnchor ? 'Current hierarchy root' : 'Open child hierarchy'}
         </button>
         {!isAnchor && (
           <button type="button" className="secondary-button" onClick={() => onExplainPath(node)} disabled={pathLoading}>

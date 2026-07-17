@@ -6,7 +6,10 @@ import {
   endpointId,
   filterAtTime,
   localSearch,
+  MAX_GRAPH_HOPS,
   shortestPath,
+  topDownPath,
+  topDownSubgraph,
 } from './graph'
 
 describe('temporal graph projection', () => {
@@ -32,6 +35,13 @@ describe('temporal graph projection', () => {
 })
 
 describe('strict anchored traversal', () => {
+  it('supports an explicit depth of up to 20 hops', () => {
+    expect(MAX_GRAPH_HOPS).toBe(20)
+    expect(boundedSubgraph(demoGraph, 'ws-brain', MAX_GRAPH_HOPS).nodes).toHaveLength(
+      demoGraph.nodes.length,
+    )
+  })
+
   it('never includes a node beyond the requested radius', () => {
     const oneHop = boundedSubgraph(demoGraph, 'ws-brain', 1)
     expect(oneHop.nodes.some((node) => node.id === 'ws-brain')).toBe(true)
@@ -48,6 +58,39 @@ describe('strict anchored traversal', () => {
   it('ranks text only inside the bounded graph', () => {
     const result = localSearch(demoGraph, 'sqlite', 'artifact-ui', 1)
     expect(result.hits.some((hit) => hit.node.id === 'decision-sqlite')).toBe(false)
+  })
+})
+
+describe('top-down hierarchy traversal', () => {
+  it('follows source-to-target child edges and excludes incoming parents', () => {
+    const hierarchy = topDownSubgraph(demoGraph, 'ws-brain', 1)
+
+    expect(hierarchy.nodes.map((node) => node.id)).toEqual([
+      'ws-brain',
+      'topic-capture',
+      'topic-graph',
+      'topic-search',
+      'decision-local',
+    ])
+    expect(hierarchy.nodes.some((node) => node.id === 'actor-user')).toBe(false)
+    expect(hierarchy.edges.every((edge) => endpointId(edge.source) === 'ws-brain')).toBe(true)
+  })
+
+  it('builds one cycle-safe spanning tree and records each node depth', () => {
+    const hierarchy = topDownSubgraph(demoGraph, 'ws-brain', 20)
+
+    expect(hierarchy.edges).toHaveLength(hierarchy.nodes.length - 1)
+    expect(hierarchy.nodes.find((node) => node.id === 'decision-sqlite')?.hierarchyDepth).toBe(2)
+    expect(new Set(hierarchy.nodes.map((node) => node.id)).size).toBe(hierarchy.nodes.length)
+  })
+
+  it('returns the complete breadcrumb segment to a descendant', () => {
+    expect(topDownPath(demoGraph, 'ws-brain', 'decision-sqlite', 20)).toEqual([
+      'ws-brain',
+      'topic-graph',
+      'decision-sqlite',
+    ])
+    expect(topDownPath(demoGraph, 'ws-brain', 'actor-user', 20)).toBeNull()
   })
 })
 

@@ -2,8 +2,9 @@
 
 These adapters turn stable agent integration surfaces into the shared Brain Hub
 CloudEvents contract. Hook execution only writes a bounded local spool; it never waits
-for the daemon or a network service. A separate foreground worker or explicit `flush`
-command delivers the spool later with the event ID as an idempotency key.
+for the daemon or a network service. The installed MCP process or managed service
+drains the spool automatically; source/custom deployments can use the foreground
+worker or explicit `flush` command. Every path uses the event ID as an idempotency key.
 
 ## Supported boundaries
 
@@ -33,9 +34,10 @@ brainhub-adapter flush --endpoint http://127.0.0.1:8420/v1/events
 
 ## Supervise continuous delivery
 
-Run exactly one foreground worker for each configured spool and supervise it with the
-operating system's service manager (for example, launchd, systemd, or a container restart
-policy):
+For a source/custom deployment that runs neither the installed MCP transport nor
+`brainhub start`, run one foreground worker for each configured spool and supervise it
+with the operating system's service manager (for example, launchd, systemd, or a
+container restart policy):
 
 ```sh
 export BRAINHUB_API_TOKEN='the-same-token-as-the-local-daemon'

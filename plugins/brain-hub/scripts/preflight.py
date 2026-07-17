@@ -10,12 +10,40 @@ import shutil
 from urllib import error, request
 
 
-def main() -> int:
-    managed_executable = Path.home() / ".local" / "share" / "brainhub" / "venv" / "bin" / "brainhub"
-    path_executable = shutil.which("brainhub")
-    executable = path_executable or (
-        str(managed_executable) if os.access(managed_executable, os.X_OK) else None
+def _installed_root() -> Path | None:
+    plugin_root = Path(os.environ.get("PLUGIN_ROOT", Path(__file__).resolve().parents[1]))
+    if plugin_root.parent.name == "plugins" and plugin_root.parent.parent.name == "marketplace":
+        return plugin_root.parents[2]
+    return None
+
+
+def _managed_executable(root: Path) -> Path | None:
+    current = root / "runtime" / "current.json"
+    if current.is_file():
+        try:
+            configured = Path(json.loads(current.read_text(encoding="utf-8"))["brainhub"])
+            resolved_root = root.resolve()
+            resolved = configured.expanduser().resolve()
+            if resolved.is_relative_to(resolved_root) and os.access(resolved, os.X_OK):
+                return resolved
+        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    relative = (
+        Path("venv") / "Scripts" / "brainhub.exe"
+        if os.name == "nt"
+        else Path("venv") / "bin" / "brainhub"
     )
+    legacy = root / relative
+    return legacy if os.access(legacy, os.X_OK) else None
+
+
+def main() -> int:
+    installed_root = _installed_root()
+    root = installed_root or Path.home() / ".local" / "share" / "brainhub"
+    managed_executable = _managed_executable(root)
+    path_executable = None if installed_root else shutil.which("brainhub")
+    executable = str(managed_executable) if managed_executable else path_executable
     health = "unavailable"
     if executable:
         try:
@@ -39,7 +67,7 @@ def main() -> int:
                 "daemon": health,
                 "runtime": (
                     "managed"
-                    if executable == str(managed_executable)
+                    if managed_executable and executable == str(managed_executable)
                     else "path"
                     if executable
                     else "missing"

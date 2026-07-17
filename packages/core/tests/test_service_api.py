@@ -37,6 +37,76 @@ def adapter_event(**overrides):
     return normalize_capture("codex", payload, mode="hook").as_dict()
 
 
+def test_health_exposes_managed_identity_and_control_shutdown_is_hidden(service):
+    shutdowns = []
+    client = TestClient(
+        create_app(
+            service,
+            settings=ApiSettings(
+                token="public-api-token",
+                instance_id="managed-instance",
+                control_token="private-control-token",
+                shutdown_callback=lambda: shutdowns.append(True),
+            ),
+        ),
+        client=("127.0.0.1", 51234),
+    )
+
+    health = client.get("/healthz")
+    denied = client.post(
+        "/_brainhub/control/shutdown",
+        headers={"X-BrainHub-Control": "wrong-control-token"},
+    )
+    accepted = client.post(
+        "/_brainhub/control/shutdown",
+        headers={"X-BrainHub-Control": "private-control-token"},
+    )
+
+    assert health.status_code == 200
+    assert health.json() == {
+        "instance_id": "managed-instance",
+        "product": "brainhub",
+        "status": "ok",
+        "version": "0.1.0",
+    }
+    assert denied.status_code == 403
+    assert accepted.status_code == 202
+    assert accepted.json() == {
+        "instance_id": "managed-instance",
+        "product": "brainhub",
+        "status": "stopping",
+    }
+    assert shutdowns == [True]
+    schema = client.get(
+        "/openapi.json",
+        headers={"Authorization": "Bearer public-api-token"},
+    ).json()
+    assert "/_brainhub/control/shutdown" not in schema["paths"]
+
+
+def test_control_shutdown_rejects_non_loopback_even_with_secret(service):
+    shutdowns = []
+    client = TestClient(
+        create_app(
+            service,
+            settings=ApiSettings(
+                instance_id="managed-instance",
+                control_token="private-control-token",
+                shutdown_callback=lambda: shutdowns.append(True),
+            ),
+        ),
+        client=("198.51.100.23", 51234),
+    )
+
+    response = client.post(
+        "/_brainhub/control/shutdown",
+        headers={"X-BrainHub-Control": "private-control-token"},
+    )
+
+    assert response.status_code == 403
+    assert shutdowns == []
+
+
 def test_adapter_event_projects_and_is_searchable_through_http(service):
     event = adapter_event()
     assert event["type"] in SUPPORTED_EVENT_TYPES
@@ -114,6 +184,26 @@ def test_strict_anchored_search_never_falls_back_global(service):
     assert scoped.json()["scope"] == "anchored"
     allowed = {node["id"] for node in client.get("/v1/nodes/ws-brain/expand?hops=1").json()["nodes"]}
     assert {item["node"]["id"] for item in scoped.json()["results"]} <= allowed
+
+
+def test_explicit_graph_depth_supports_20_hops_but_rejects_21(service):
+    seed_demo(service)
+    client = TestClient(create_app(service))
+
+    expanded = client.get("/v1/nodes/ws-brain/expand?hops=20")
+    searched = client.post(
+        "/v1/search",
+        json={"query": "graph", "scope": "anchored", "anchor_id": "ws-brain", "hops": 20},
+    )
+
+    assert expanded.status_code == 200
+    assert expanded.json()["hops"] == 20
+    assert searched.status_code == 200
+    assert client.get("/v1/nodes/ws-brain/expand?hops=21").status_code == 422
+    assert client.post(
+        "/v1/search",
+        json={"query": "graph", "scope": "anchored", "anchor_id": "ws-brain", "hops": 21},
+    ).status_code == 422
 
 
 def test_degraded_anchored_search_requires_a_text_match_before_graph_boost(service):

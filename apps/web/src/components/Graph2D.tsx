@@ -49,6 +49,8 @@ export function Graph2D({
       height={height}
       graphData={{ nodes: graph.nodes, links: graph.edges }}
       nodeId="id"
+      dagMode="td"
+      dagLevelDistance={90}
       nodeLabel={(rawNode) => `${(rawNode as BrainNode).label} · ${(rawNode as BrainNode).kind}`}
       nodeCanvasObject={(rawNode, context, globalScale) => {
         const node = rawNode as BrainNode

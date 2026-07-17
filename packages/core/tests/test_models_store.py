@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
+import os
+import stat
 import sys
 import threading
 import time
@@ -12,7 +15,14 @@ import pytest
 from nacl.exceptions import CryptoError
 from pydantic import ValidationError
 
-from brainhub.crypto import ContentCipher, KeyringKeyProvider, MemoryKeyProvider
+from brainhub.crypto import (
+    ContentCipher,
+    DefaultKeyProvider,
+    KeyringKeyProvider,
+    KeyringUnavailableError,
+    KeyUnavailableError,
+    MemoryKeyProvider,
+)
 from brainhub.models import (
     BrainEvent,
     Edge,
@@ -149,6 +159,284 @@ def test_keyring_first_key_creation_is_locked_and_reread(monkeypatch, tmp_path):
     assert len(keys[0]) == 32
     assert state["writes"] == 1
     assert state["reads"] == 4
+
+
+def test_selected_keyring_never_recreates_missing_key(monkeypatch, tmp_path):
+    writes = []
+    monkeypatch.setitem(
+        sys.modules,
+        "keyring",
+        SimpleNamespace(
+            get_password=lambda _service, _installation: None,
+            set_password=lambda *_args: writes.append(True),
+        ),
+    )
+    provider = KeyringKeyProvider(
+        "missing-keyring-installation",
+        lock_path=tmp_path / "keyring.lock",
+    )
+
+    with pytest.raises(KeyUnavailableError, match="missing"):
+        provider.get_existing_key()
+    assert writes == []
+
+
+def test_default_key_provider_keeps_explicit_environment_override_first(
+    monkeypatch,
+    tmp_path,
+):
+    expected = bytes(reversed(range(32)))
+    monkeypatch.setenv(
+        "BRAINHUB_MASTER_KEY",
+        base64.urlsafe_b64encode(expected).decode("ascii"),
+    )
+
+    class ForbiddenKeyring:
+        def get_key(self):
+            raise AssertionError("environment override must bypass automatic providers")
+
+        def get_existing_key(self):
+            raise AssertionError("environment override must bypass automatic providers")
+
+    provider = DefaultKeyProvider(
+        "environment-installation",
+        state_dir=tmp_path / "must-not-be-created",
+        keyring_provider=ForbiddenKeyring(),
+    )
+
+    assert provider.get_key() == expected
+    assert not provider.state_dir.exists()
+
+
+def test_default_key_provider_pins_working_keyring_and_refuses_later_fallback(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    expected = bytes(range(32))
+
+    class WorkingKeyring:
+        def get_key(self):
+            return expected
+
+        def get_existing_key(self):
+            return expected
+
+    first = DefaultKeyProvider(
+        "keyring-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=WorkingKeyring(),
+    )
+    assert first.get_key() == expected
+    assert first.provider_path.read_bytes() == first.KEYRING_CHOICE
+
+    class UnavailableKeyring:
+        def get_key(self):
+            raise AssertionError("a persisted choice must use the existing-key path")
+
+        def get_existing_key(self):
+            raise KeyringUnavailableError("simulated keyring outage")
+
+    reopened = DefaultKeyProvider(
+        "keyring-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=UnavailableKeyring(),
+    )
+    with pytest.raises(KeyringUnavailableError, match="outage"):
+        reopened.get_key()
+    assert not reopened.local_file.key_path.exists()
+    if os.name == "posix":
+        assert stat.S_IMODE(first.provider_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(first.state_dir.stat().st_mode) == 0o700
+
+
+def test_default_key_provider_falls_back_once_and_keeps_the_same_local_key(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+
+    class UnavailableKeyring:
+        def get_key(self):
+            raise KeyringUnavailableError("headless Linux")
+
+        def get_existing_key(self):
+            raise AssertionError("no keyring choice has been persisted")
+
+    first = DefaultKeyProvider(
+        "headless-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=UnavailableKeyring(),
+    )
+    selected = first.get_key()
+
+    assert len(selected) == 32
+    assert first.provider_path.read_bytes() == first.LOCAL_FILE_CHOICE
+    assert first.local_file.key_path.read_bytes() == selected
+    if os.name == "posix":
+        assert stat.S_IMODE(first.provider_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(first.local_file.key_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(first.state_dir.stat().st_mode) == 0o700
+
+    class RecoveredKeyring:
+        def get_key(self):
+            raise AssertionError("persisted local choice must not probe the keyring")
+
+        def get_existing_key(self):
+            raise AssertionError("persisted local choice must not probe the keyring")
+
+    reopened = DefaultKeyProvider(
+        "headless-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=RecoveredKeyring(),
+    )
+    assert reopened.get_key() == selected
+
+
+def test_concurrent_first_use_creates_one_stable_local_key(monkeypatch, tmp_path):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+
+    class UnavailableKeyring:
+        def get_key(self):
+            raise KeyringUnavailableError("headless Linux")
+
+        def get_existing_key(self):
+            raise AssertionError("local provider was selected")
+
+    def load_key(_index):
+        return DefaultKeyProvider(
+            "concurrent-headless-installation",
+            state_dir=tmp_path / "keys",
+            keyring_provider=UnavailableKeyring(),
+        ).get_key()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        keys = list(executor.map(load_key, range(4)))
+
+    assert len(set(keys)) == 1
+    assert len(keys[0]) == 32
+    assert len(list((tmp_path / "keys").glob("*.key"))) == 1
+    assert len(list((tmp_path / "keys").glob("*.provider"))) == 1
+
+
+def test_default_key_provider_never_replaces_a_missing_selected_local_key(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+
+    class UnavailableKeyring:
+        def get_key(self):
+            raise KeyringUnavailableError("headless Linux")
+
+        def get_existing_key(self):
+            raise AssertionError("local provider was selected")
+
+    first = DefaultKeyProvider(
+        "deleted-key-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=UnavailableKeyring(),
+    )
+    first.get_key()
+    first.local_file.key_path.unlink()
+
+    reopened = DefaultKeyProvider(
+        "deleted-key-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=UnavailableKeyring(),
+    )
+    with pytest.raises(KeyUnavailableError, match="missing"):
+        reopened.get_key()
+    assert not reopened.local_file.key_path.exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX ownership and mode checks")
+def test_local_key_state_rejects_insecure_mode_and_symbolic_links(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+
+    class UnavailableKeyring:
+        def get_key(self):
+            raise KeyringUnavailableError("headless Linux")
+
+        def get_existing_key(self):
+            raise AssertionError("local provider was selected")
+
+    first = DefaultKeyProvider(
+        "tampered-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=UnavailableKeyring(),
+    )
+    first.get_key()
+    first.local_file.key_path.chmod(0o644)
+
+    with pytest.raises(KeyUnavailableError, match="0600"):
+        first.get_key()
+
+    first.local_file.key_path.unlink()
+    target = tmp_path / "attacker-controlled-key"
+    target.write_bytes(bytes(range(32)))
+    target.chmod(0o600)
+    first.local_file.key_path.symlink_to(target)
+
+    with pytest.raises(KeyUnavailableError, match="symbolic link"):
+        first.get_key()
+
+    first.local_file.key_path.unlink()
+    first.local_file.key_path.write_bytes(bytes(range(32)))
+    first.local_file.key_path.chmod(0o600)
+    first.provider_path.chmod(0o644)
+
+    with pytest.raises(KeyUnavailableError, match="0600"):
+        first.get_key()
+
+    first.provider_path.unlink()
+    first.provider_path.mkdir(mode=0o700)
+
+    with pytest.raises(KeyUnavailableError, match="regular file"):
+        first.get_key()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX ownership checks")
+def test_local_key_state_rejects_files_not_owned_by_current_user(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    state_dir = tmp_path / "keys"
+    state_dir.mkdir(mode=0o700)
+    actual_uid = os.getuid()
+    monkeypatch.setattr(os, "getuid", lambda: actual_uid + 1)
+
+    provider = DefaultKeyProvider(
+        "wrong-owner-installation",
+        state_dir=state_dir,
+    )
+    with pytest.raises(KeyUnavailableError, match="not owned"):
+        provider.get_key()
+
+
+def test_corrupt_keyring_state_does_not_trigger_local_fallback(monkeypatch, tmp_path):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+
+    class CorruptKeyring:
+        def get_key(self):
+            raise KeyUnavailableError("stored OS keychain master key is corrupt")
+
+        def get_existing_key(self):
+            raise AssertionError("provider choice was not persisted")
+
+    provider = DefaultKeyProvider(
+        "corrupt-keyring-installation",
+        state_dir=tmp_path / "keys",
+        keyring_provider=CorruptKeyring(),
+    )
+    with pytest.raises(KeyUnavailableError, match="corrupt"):
+        provider.get_key()
+    assert not provider.local_file.key_path.exists()
+    assert not provider.provider_path.exists()
 
 
 def test_append_is_idempotent_and_conflicting_reuse_is_rejected(tmp_path):
