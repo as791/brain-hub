@@ -186,6 +186,7 @@ def test_default_key_provider_keeps_explicit_environment_override_first(
     tmp_path,
 ):
     expected = bytes(reversed(range(32)))
+    monkeypatch.setattr(sys, "stdin", None)
     monkeypatch.setenv(
         "BRAINHUB_MASTER_KEY",
         base64.urlsafe_b64encode(expected).decode("ascii"),
@@ -208,11 +209,51 @@ def test_default_key_provider_keeps_explicit_environment_override_first(
     assert not provider.state_dir.exists()
 
 
+@pytest.mark.parametrize(
+    "stdin",
+    [
+        None,
+        SimpleNamespace(isatty=lambda: False),
+    ],
+    ids=["missing", "not-a-tty"],
+)
+def test_default_key_provider_pins_local_without_probing_keyring_when_headless(
+    monkeypatch,
+    tmp_path,
+    stdin,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    monkeypatch.setattr(sys, "stdin", stdin)
+
+    def forbidden_keyring_call(*_args):
+        raise AssertionError("headless first use must not probe the OS keyring")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "keyring",
+        SimpleNamespace(
+            get_password=forbidden_keyring_call,
+            set_password=forbidden_keyring_call,
+        ),
+    )
+    provider = DefaultKeyProvider(
+        "headless-default-installation",
+        state_dir=tmp_path / "keys",
+    )
+
+    selected = provider.get_key()
+
+    assert len(selected) == 32
+    assert provider.provider_path.read_bytes() == provider.LOCAL_FILE_CHOICE
+    assert provider.local_file.key_path.read_bytes() == selected
+
+
 def test_default_key_provider_pins_working_keyring_and_refuses_later_fallback(
     monkeypatch,
     tmp_path,
 ):
     monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
     expected = bytes(range(32))
 
     class WorkingKeyring:
@@ -248,6 +289,41 @@ def test_default_key_provider_pins_working_keyring_and_refuses_later_fallback(
     if os.name == "posix":
         assert stat.S_IMODE(first.provider_path.stat().st_mode) == 0o600
         assert stat.S_IMODE(first.state_dir.stat().st_mode) == 0o700
+
+
+def test_headless_reopen_honors_pinned_default_keyring_and_fails_closed(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    expected = bytes(range(32))
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(KeyringKeyProvider, "get_key", lambda _self: expected)
+
+    first = DefaultKeyProvider(
+        "pinned-headless-keyring-installation",
+        state_dir=tmp_path / "keys",
+    )
+    assert first.get_key() == expected
+    assert first.provider_path.read_bytes() == first.KEYRING_CHOICE
+
+    def unavailable_existing_key(_self):
+        raise KeyringUnavailableError("simulated OS keyring outage")
+
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    monkeypatch.setattr(
+        KeyringKeyProvider,
+        "get_existing_key",
+        unavailable_existing_key,
+    )
+    reopened = DefaultKeyProvider(
+        "pinned-headless-keyring-installation",
+        state_dir=tmp_path / "keys",
+    )
+
+    with pytest.raises(KeyringUnavailableError, match="outage"):
+        reopened.get_key()
+    assert not reopened.local_file.key_path.exists()
 
 
 def test_default_key_provider_falls_back_once_and_keeps_the_same_local_key(

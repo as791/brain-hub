@@ -98,9 +98,10 @@ One run installs and verifies:
   and Antigravity hosts, without overwriting a pre-existing unrelated entry.
 
 The installer is idempotent, adds its launcher directory to the user `PATH`, and
-keeps the previous runtime available when the source changes. It prefers the operating
-system keychain; on headless systems without one, it creates and pins a private
-per-installation key. Restart any open agent hosts after installation. In Codex,
+keeps the previous runtime available when the source changes. On interactive first
+use it prefers the operating-system keychain; on non-interactive or headless first
+use it creates and pins a private per-installation local key so background agents
+cannot stall on an unavailable keychain prompt. Restart any open agent hosts after installation. In Codex,
 review and trust the lifecycle hooks once with `/hooks`. If the command is not visible
 in an already-open terminal, open a new terminal.
 

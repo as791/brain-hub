@@ -1,3 +1,4 @@
+import ctypes
 import io
 import json
 import os
@@ -11,6 +12,7 @@ from typer.testing import CliRunner
 
 from brainhub.api import PRODUCT_ID
 from brainhub.cli import (
+    SERVICE_START_TIMEOUT_SECONDS,
     ManagedServiceState,
     _WebConsoleHandler,
     _atomic_write_service_state,
@@ -18,6 +20,7 @@ from brainhub.cli import (
     _configuration_matches,
     _ensure_service,
     _flush_spool_directly,
+    _process_exists,
     _python_executable_identity,
     _read_service_state,
     _service_config_fingerprint,
@@ -28,6 +31,7 @@ from brainhub.cli import (
     _terminate_and_reap_child,
     _terminate_service_process,
     _web_asset_dir,
+    _windows_process_exists,
     app,
 )
 from brainhub_adapters.normalize import normalize_capture
@@ -189,6 +193,103 @@ def test_health_requires_matching_api_and_ui_instance(monkeypatch) -> None:
     assert not _service_is_healthy(state)
 
 
+@pytest.mark.parametrize(
+    ("exit_code", "expected"),
+    [
+        (259, True),
+        (0, False),
+    ],
+)
+def test_windows_process_exists_reads_exit_code(
+    monkeypatch, exit_code: int, expected: bool
+) -> None:
+    class Function:
+        argtypes = None
+        restype = None
+
+        def __init__(self, implementation):
+            self.implementation = implementation
+
+        def __call__(self, *args):
+            return self.implementation(*args)
+
+    handles = []
+
+    def get_exit_code(_handle, output):
+        output._obj.value = exit_code
+        return True
+
+    class Kernel32:
+        OpenProcess = Function(lambda _access, _inherit, _pid: 321)
+        GetExitCodeProcess = Function(get_exit_code)
+        CloseHandle = Function(lambda handle: handles.append(handle) or True)
+
+    monkeypatch.setattr(
+        ctypes,
+        "WinDLL",
+        lambda _name, **_kwargs: Kernel32(),
+        raising=False,
+    )
+
+    assert _windows_process_exists(123) is expected
+    assert handles == [321]
+
+
+@pytest.mark.parametrize(
+    ("last_error", "expected"),
+    [
+        (5, True),
+        (87, False),
+        (8, True),
+    ],
+)
+def test_windows_process_exists_handles_open_failures(
+    monkeypatch, last_error: int, expected: bool
+) -> None:
+    class Function:
+        argtypes = None
+        restype = None
+
+        def __init__(self, result):
+            self.result = result
+
+        def __call__(self, *_args):
+            return self.result
+
+    class Kernel32:
+        OpenProcess = Function(0)
+        GetExitCodeProcess = Function(False)
+        CloseHandle = Function(True)
+
+    monkeypatch.setattr(
+        ctypes,
+        "WinDLL",
+        lambda _name, **_kwargs: Kernel32(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ctypes,
+        "get_last_error",
+        lambda: last_error,
+        raising=False,
+    )
+
+    assert _windows_process_exists(123) is expected
+
+
+def test_process_exists_uses_windows_probe_instead_of_os_kill(monkeypatch) -> None:
+    checked = []
+
+    monkeypatch.setattr("brainhub.cli.os.name", "nt")
+    monkeypatch.setattr(
+        "brainhub.cli._windows_process_exists",
+        lambda pid: checked.append(pid) or True,
+    )
+
+    assert _process_exists(123)
+    assert checked == [123]
+
+
 def test_bundled_ui_health_exposes_product_and_instance() -> None:
     handler = object.__new__(_WebConsoleHandler)
     handler.instance_id = "ui-instance"
@@ -315,7 +416,7 @@ def test_failed_startup_terminates_and_reaps_child_without_state(
             actions.append(("wait", timeout))
             return 1
 
-    moments = iter([0.0, 9.0])
+    moments = iter([0.0, SERVICE_START_TIMEOUT_SECONDS + 1.0])
     monkeypatch.setattr("brainhub.cli._read_service_state", lambda: None)
     monkeypatch.setattr("brainhub.cli._launch_service", lambda *_args: Process())
     monkeypatch.setattr("brainhub.cli._runtime_dir", lambda: tmp_path)

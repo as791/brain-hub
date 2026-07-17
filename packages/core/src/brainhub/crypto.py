@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import os
 import stat
+import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -380,6 +381,7 @@ class DefaultKeyProvider:
         keyring_provider: KeyringKeyProvider | None = None,
     ) -> None:
         self.environment = EnvironmentKeyProvider()
+        self._keyring_was_injected = keyring_provider is not None
         self.keyring = keyring_provider or KeyringKeyProvider(
             installation_id,
             service=service,
@@ -393,6 +395,15 @@ class DefaultKeyProvider:
         self.state_dir = self.local_file.state_dir
         self.provider_path = self.state_dir / f"{digest}.provider"
         self.lock_path = self.state_dir / f"{digest}.provider.lock"
+
+    @staticmethod
+    def _interactive_stdin_available() -> bool:
+        """Return whether first-use keychain interaction can reach a user."""
+
+        try:
+            return bool(sys.stdin is not None and sys.stdin.isatty())
+        except (AttributeError, OSError, ValueError):
+            return False
 
     def _provider_choice(self) -> bytes | None:
         try:
@@ -425,12 +436,19 @@ class DefaultKeyProvider:
             if choice == self.LOCAL_FILE_CHOICE:
                 return self.local_file.get_existing_key()
 
-            try:
-                key = self.keyring.get_key()
-                selected = self.KEYRING_CHOICE
-            except KeyringUnavailableError:
+            if (
+                not self._keyring_was_injected
+                and not self._interactive_stdin_available()
+            ):
                 key = self.local_file.get_key()
                 selected = self.LOCAL_FILE_CHOICE
+            else:
+                try:
+                    key = self.keyring.get_key()
+                    selected = self.KEYRING_CHOICE
+                except KeyringUnavailableError:
+                    key = self.local_file.get_key()
+                    selected = self.LOCAL_FILE_CHOICE
             self._persist_provider_choice(selected)
             return key
 

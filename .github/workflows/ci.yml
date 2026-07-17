@@ -236,3 +236,25 @@ jobs:
           if (-not (Get-ChildItem "$HOME\.local\share\brainhub\keys" -Filter "*.provider")) {
             throw "automatic key provider choice was not persisted"
           }
+
+      - name: Show managed-service log after product failure (macOS/Linux)
+        if: failure() && runner.os != 'Windows'
+        shell: bash
+        run: |
+          log="$HOME/.local/share/brainhub/run/service.log"
+          if [ -f "$log" ]; then
+            tail -n 200 "$log"
+          else
+            echo "Brain Hub service log was not created."
+          fi
+
+      - name: Show managed-service log after product failure (Windows)
+        if: failure() && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $log = "$HOME\.local\share\brainhub\run\service.log"
+          if (Test-Path $log) {
+            Get-Content $log -Tail 200
+          } else {
+            Write-Host "Brain Hub service log was not created."
+          }

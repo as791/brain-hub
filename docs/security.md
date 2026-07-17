@@ -30,9 +30,10 @@ Agent hosts and adapter processes are untrusted producers. Graph text is untrust
 - Content fields and blobs use XChaCha20-Poly1305 with a fresh nonce and authenticated record context.
 - The pre-daemon adapter spool contains only redacted metadata and explicitly supplied summaries, is bounded, and uses owner-only permissions. It is not yet application-encrypted, so daily use requires an encrypted home volume; spool encryption is a public-release hardening gate.
 - An explicit `BRAINHUB_MASTER_KEY` remains the highest-priority deployment override. Without it,
-  each installation pins its first successful automatic provider in a private marker: a working OS
-  keychain is preferred, while a headless system with no usable keychain atomically creates one
-  unique 32-byte key in the per-user Brain Hub key directory.
+  each installation pins its first successful automatic provider in a private marker. Interactive
+  first use prefers a working OS keychain; non-interactive or headless first use atomically creates
+  one unique 32-byte key in the per-user Brain Hub key directory instead, avoiding an unavailable
+  keychain prompt in a background agent.
 - The local fallback key, provider marker, and lock files are never logged. On POSIX systems the
   directory must be owned by the current user with mode `0700`, files must be regular,
   non-symlink, current-user-owned files with mode `0600`, and insecure state is rejected rather
