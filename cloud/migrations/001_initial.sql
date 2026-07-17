@@ -55,9 +55,13 @@ DECLARE
   normalized_key text;
 BEGIN
   IF jsonb_typeof(value) = 'object' THEN
-    FOR member IN SELECT key, value FROM jsonb_each(value)
+    FOR member IN
+      SELECT entry.object_key, entry.object_value
+      FROM jsonb_each(value) AS entry(object_key, object_value)
     LOOP
-      normalized_key := lower(replace(replace(member.key, '-', '_'), ' ', '_'));
+      normalized_key := lower(
+        replace(replace(member.object_key, '-', '_'), ' ', '_')
+      );
       IF normalized_key = ANY (ARRAY[
         'prompt', 'prompts', 'transcript', 'transcripts', 'messages',
         'assistant_message', 'assistant_text', 'user_message', 'tool_input',
@@ -69,14 +73,16 @@ BEGIN
       ]) THEN
         RETURN true;
       END IF;
-      IF public.jsonb_has_forbidden_brainhub_key(member.value) THEN
+      IF public.jsonb_has_forbidden_brainhub_key(member.object_value) THEN
         RETURN true;
       END IF;
     END LOOP;
   ELSIF jsonb_typeof(value) = 'array' THEN
-    FOR member IN SELECT value FROM jsonb_array_elements(value)
+    FOR member IN
+      SELECT entry.array_value
+      FROM jsonb_array_elements(value) AS entry(array_value)
     LOOP
-      IF public.jsonb_has_forbidden_brainhub_key(member.value) THEN
+      IF public.jsonb_has_forbidden_brainhub_key(member.array_value) THEN
         RETURN true;
       END IF;
     END LOOP;
