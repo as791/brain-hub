@@ -405,6 +405,33 @@ class DefaultKeyProvider:
         except (AttributeError, OSError, ValueError):
             return False
 
+    @staticmethod
+    def _headless_override() -> bool | None:
+        configured = os.environ.get("BRAINHUB_HEADLESS")
+        if configured is None:
+            return None
+        normalized = configured.strip().casefold()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        raise KeyUnavailableError(
+            "BRAINHUB_HEADLESS must be true/false, yes/no, on/off, or 1/0"
+        )
+
+    @classmethod
+    def _headless_first_selection(cls) -> bool:
+        override = cls._headless_override()
+        if override is not None:
+            return override
+        truthy = {"1", "true", "yes", "on"}
+        if any(
+            os.environ.get(variable, "").strip().casefold() in truthy
+            for variable in ("CI", "GITHUB_ACTIONS")
+        ):
+            return True
+        return not cls._interactive_stdin_available()
+
     def _provider_choice(self) -> bytes | None:
         try:
             choice = _read_private_file(
@@ -438,7 +465,7 @@ class DefaultKeyProvider:
 
             if (
                 not self._keyring_was_injected
-                and not self._interactive_stdin_available()
+                and self._headless_first_selection()
             ):
                 key = self.local_file.get_key()
                 selected = self.LOCAL_FILE_CHOICE

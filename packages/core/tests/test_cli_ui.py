@@ -6,8 +6,11 @@ import signal
 import subprocess
 from pathlib import Path
 from threading import Event
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from brainhub.api import PRODUCT_ID
@@ -26,12 +29,14 @@ from brainhub.cli import (
     _service_config_fingerprint,
     _service_is_healthy,
     _service_lock,
+    _service_lock_is_held,
     _service_state_path,
     _start_adapter_watcher,
     _terminate_and_reap_child,
     _terminate_service_process,
     _web_asset_dir,
     _windows_process_exists,
+    _windows_service_mutex_is_held,
     app,
 )
 from brainhub_adapters.normalize import normalize_capture
@@ -167,6 +172,89 @@ def test_service_state_requires_the_live_managed_lock(
     with _service_lock():
         _atomic_write_service_state(state)
         assert _read_service_state() == state
+
+
+@pytest.mark.parametrize(
+    ("handle", "last_error", "expected"),
+    [
+        (654, 0, True),
+        (0, 2, False),
+        (0, 5, True),
+    ],
+)
+def test_windows_service_mutex_presence_is_ownership_signal(
+    monkeypatch, handle: int, last_error: int, expected: bool
+) -> None:
+    kernel32 = Mock()
+    kernel32.OpenMutexW.return_value = handle
+    monkeypatch.setattr(
+        ctypes,
+        "WinDLL",
+        lambda _name, **_kwargs: kernel32,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ctypes,
+        "get_last_error",
+        lambda: last_error,
+        raising=False,
+    )
+
+    assert _windows_service_mutex_is_held() is expected
+    if handle:
+        kernel32.CloseHandle.assert_called_once_with(handle)
+    else:
+        kernel32.CloseHandle.assert_not_called()
+
+
+def test_windows_service_lock_holds_named_mutex_for_context(monkeypatch) -> None:
+    kernel32 = Mock()
+    kernel32.CreateMutexW.return_value = 321
+    kernel32.WaitForSingleObject.return_value = 0
+    kernel32.OpenMutexW.return_value = 654
+    monkeypatch.setattr("brainhub.cli.os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        "brainhub.cli._windows_service_mutex_name",
+        lambda: "Local\\BrainHub.Service.test",
+    )
+    monkeypatch.setattr(
+        ctypes,
+        "WinDLL",
+        lambda _name, **_kwargs: kernel32,
+        raising=False,
+    )
+
+    with _service_lock():
+        assert _service_lock_is_held()
+        kernel32.ReleaseMutex.assert_not_called()
+
+    kernel32.ReleaseMutex.assert_called_once_with(321)
+    kernel32.CloseHandle.assert_any_call(654)
+    kernel32.CloseHandle.assert_any_call(321)
+
+
+def test_windows_service_lock_rejects_concurrent_owner(monkeypatch) -> None:
+    kernel32 = Mock()
+    kernel32.CreateMutexW.return_value = 321
+    kernel32.WaitForSingleObject.return_value = 0x00000102
+    monkeypatch.setattr("brainhub.cli.os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        "brainhub.cli._windows_service_mutex_name",
+        lambda: "Local\\BrainHub.Service.test",
+    )
+    monkeypatch.setattr(
+        ctypes,
+        "WinDLL",
+        lambda _name, **_kwargs: kernel32,
+        raising=False,
+    )
+
+    with pytest.raises(typer.BadParameter, match="already starting or running"):
+        with _service_lock():
+            pytest.fail("contending service acquired the mutex")
+
+    kernel32.ReleaseMutex.assert_not_called()
+    kernel32.CloseHandle.assert_called_once_with(321)
 
 
 def test_health_requires_matching_api_and_ui_instance(monkeypatch) -> None:

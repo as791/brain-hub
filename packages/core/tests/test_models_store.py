@@ -187,6 +187,7 @@ def test_default_key_provider_keeps_explicit_environment_override_first(
 ):
     expected = bytes(reversed(range(32)))
     monkeypatch.setattr(sys, "stdin", None)
+    monkeypatch.setenv("BRAINHUB_HEADLESS", "not-a-boolean")
     monkeypatch.setenv(
         "BRAINHUB_MASTER_KEY",
         base64.urlsafe_b64encode(expected).decode("ascii"),
@@ -223,6 +224,8 @@ def test_default_key_provider_pins_local_without_probing_keyring_when_headless(
     stdin,
 ):
     monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    for variable in ("BRAINHUB_HEADLESS", "CI", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(variable, raising=False)
     monkeypatch.setattr(sys, "stdin", stdin)
 
     def forbidden_keyring_call(*_args):
@@ -248,11 +251,93 @@ def test_default_key_provider_pins_local_without_probing_keyring_when_headless(
     assert provider.local_file.key_path.read_bytes() == selected
 
 
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [
+        ("BRAINHUB_HEADLESS", "true"),
+        ("CI", "true"),
+        ("GITHUB_ACTIONS", "true"),
+    ],
+)
+def test_default_key_provider_pins_local_for_explicit_or_automated_headless_use(
+    monkeypatch,
+    tmp_path,
+    variable,
+    value,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    for candidate in ("BRAINHUB_HEADLESS", "CI", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(candidate, raising=False)
+    monkeypatch.setenv(variable, value)
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+
+    def forbidden_keyring_call(*_args):
+        raise AssertionError("automated first use must not probe the OS keyring")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "keyring",
+        SimpleNamespace(
+            get_password=forbidden_keyring_call,
+            set_password=forbidden_keyring_call,
+        ),
+    )
+    provider = DefaultKeyProvider(
+        f"automated-{variable.lower()}-installation",
+        state_dir=tmp_path / "keys",
+    )
+
+    selected = provider.get_key()
+
+    assert len(selected) == 32
+    assert provider.provider_path.read_bytes() == provider.LOCAL_FILE_CHOICE
+
+
+def test_explicit_headless_false_allows_default_keyring_in_automation(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("BRAINHUB_HEADLESS", "false")
+    monkeypatch.setattr(sys, "stdin", None)
+    expected = bytes(range(32))
+    monkeypatch.setattr(KeyringKeyProvider, "get_key", lambda _self: expected)
+
+    provider = DefaultKeyProvider(
+        "forced-interactive-installation",
+        state_dir=tmp_path / "keys",
+    )
+
+    assert provider.get_key() == expected
+    assert provider.provider_path.read_bytes() == provider.KEYRING_CHOICE
+    assert not provider.local_file.key_path.exists()
+
+
+def test_invalid_headless_override_fails_before_selecting_a_provider(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    monkeypatch.setenv("BRAINHUB_HEADLESS", "sometimes")
+    provider = DefaultKeyProvider(
+        "invalid-headless-installation",
+        state_dir=tmp_path / "keys",
+    )
+
+    with pytest.raises(KeyUnavailableError, match="BRAINHUB_HEADLESS"):
+        provider.get_key()
+    assert not provider.provider_path.exists()
+    assert not provider.local_file.key_path.exists()
+
+
 def test_default_key_provider_pins_working_keyring_and_refuses_later_fallback(
     monkeypatch,
     tmp_path,
 ):
     monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    monkeypatch.setenv("BRAINHUB_HEADLESS", "not-a-boolean")
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
     expected = bytes(range(32))
 
@@ -296,6 +381,8 @@ def test_headless_reopen_honors_pinned_default_keyring_and_fails_closed(
     tmp_path,
 ):
     monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    for variable in ("BRAINHUB_HEADLESS", "CI", "GITHUB_ACTIONS"):
+        monkeypatch.delenv(variable, raising=False)
     expected = bytes(range(32))
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
     monkeypatch.setattr(KeyringKeyProvider, "get_key", lambda _self: expected)
@@ -310,6 +397,7 @@ def test_headless_reopen_honors_pinned_default_keyring_and_fails_closed(
     def unavailable_existing_key(_self):
         raise KeyringUnavailableError("simulated OS keyring outage")
 
+    monkeypatch.setenv("BRAINHUB_HEADLESS", "not-a-boolean")
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: False))
     monkeypatch.setattr(
         KeyringKeyProvider,

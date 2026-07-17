@@ -33,7 +33,11 @@ Agent hosts and adapter processes are untrusted producers. Graph text is untrust
   each installation pins its first successful automatic provider in a private marker. Interactive
   first use prefers a working OS keychain; non-interactive or headless first use atomically creates
   one unique 32-byte key in the per-user Brain Hub key directory instead, avoiding an unavailable
-  keychain prompt in a background agent.
+  keychain prompt in a background agent. Missing/non-TTY stdin and truthy `CI` or
+  `GITHUB_ACTIONS` are treated as headless. `BRAINHUB_HEADLESS=true` explicitly selects this
+  first-use policy; `BRAINHUB_HEADLESS=false` explicitly allows first-use keychain selection.
+  Accepted boolean values are `true/false`, `yes/no`, `on/off`, and `1/0`. The setting is ignored
+  after a provider marker exists, preserving fail-closed provider continuity.
 - The local fallback key, provider marker, and lock files are never logged. On POSIX systems the
   directory must be owned by the current user with mode `0700`, files must be regular,
   non-symlink, current-user-owned files with mode `0600`, and insecure state is rejected rather

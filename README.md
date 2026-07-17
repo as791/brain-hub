@@ -101,9 +101,14 @@ The installer is idempotent, adds its launcher directory to the user `PATH`, and
 keeps the previous runtime available when the source changes. On interactive first
 use it prefers the operating-system keychain; on non-interactive or headless first
 use it creates and pins a private per-installation local key so background agents
-cannot stall on an unavailable keychain prompt. Restart any open agent hosts after installation. In Codex,
-review and trust the lifecycle hooks once with `/hooks`. If the command is not visible
-in an already-open terminal, open a new terminal.
+cannot stall on an unavailable keychain prompt. Truthy `CI` or `GITHUB_ACTIONS`
+marks first use as headless even when the runner provides a pseudo-TTY.
+`BRAINHUB_HEADLESS=true` forces that behavior, while
+`BRAINHUB_HEADLESS=false` explicitly permits first-use keychain selection. The
+override has no effect after a provider is pinned. Restart any open agent hosts
+after installation. In Codex, review and trust the lifecycle hooks once with
+`/hooks`. If the command is not visible in an already-open terminal, open a new
+terminal.
 
 Verify the complete installed path:
 

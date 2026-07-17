@@ -216,6 +216,12 @@ def _service_lock_path() -> Path:
     return _runtime_dir() / "service.lock"
 
 
+def _windows_service_mutex_name() -> str:
+    authority = _normalized_path_identity(_runtime_dir()).encode("utf-8")
+    digest = hashlib.sha256(authority).hexdigest()
+    return f"Local\\BrainHub.Service.{digest}"
+
+
 def _python_executable_identity() -> str:
     """Return a stable, exact identity for the interpreter hosting this command."""
 
@@ -388,8 +394,107 @@ def _unlock_file(handle: BinaryIO) -> None:
     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _windows_mutex_api():
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_mutex = kernel32.CreateMutexW
+    create_mutex.argtypes = (
+        ctypes.c_void_p,
+        wintypes.BOOL,
+        wintypes.LPCWSTR,
+    )
+    create_mutex.restype = wintypes.HANDLE
+    open_mutex = kernel32.OpenMutexW
+    open_mutex.argtypes = (
+        wintypes.DWORD,
+        wintypes.BOOL,
+        wintypes.LPCWSTR,
+    )
+    open_mutex.restype = wintypes.HANDLE
+    wait_for_single_object = kernel32.WaitForSingleObject
+    wait_for_single_object.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    wait_for_single_object.restype = wintypes.DWORD
+    release_mutex = kernel32.ReleaseMutex
+    release_mutex.argtypes = (wintypes.HANDLE,)
+    release_mutex.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    return (
+        ctypes,
+        create_mutex,
+        open_mutex,
+        wait_for_single_object,
+        release_mutex,
+        close_handle,
+    )
+
+
+def _acquire_windows_service_mutex():
+    (
+        ctypes,
+        create_mutex,
+        _open_mutex,
+        wait_for_single_object,
+        release_mutex,
+        close_handle,
+    ) = _windows_mutex_api()
+    handle = create_mutex(None, False, _windows_service_mutex_name())
+    if not handle:
+        raise OSError(
+            ctypes.get_last_error(),
+            "could not create the Brain Hub service mutex",
+        )
+    wait_result = wait_for_single_object(handle, 0)
+    if wait_result in {0x00000000, 0x00000080}:
+        return handle, release_mutex, close_handle
+    close_handle(handle)
+    if wait_result == 0x00000102:
+        raise BlockingIOError("Brain Hub service mutex is already held")
+    raise OSError(
+        ctypes.get_last_error(),
+        "could not acquire the Brain Hub service mutex",
+    )
+
+
+def _windows_service_mutex_is_held() -> bool:
+    (
+        ctypes,
+        _create_mutex,
+        open_mutex,
+        _wait_for_single_object,
+        _release_mutex,
+        close_handle,
+    ) = _windows_mutex_api()
+    synchronize = 0x00100000
+    error_file_not_found = 2
+    handle = open_mutex(synchronize, False, _windows_service_mutex_name())
+    if not handle:
+        # Access denial or an indeterminate query must not allow a duplicate
+        # daemon to start. A missing named object is the only definitive miss.
+        return ctypes.get_last_error() != error_file_not_found
+    close_handle(handle)
+    return True
+
+
 @contextmanager
 def _service_lock() -> Iterator[None]:
+    if os.name == "nt":
+        try:
+            handle, release_mutex, close_handle = _acquire_windows_service_mutex()
+        except OSError as exc:
+            raise typer.BadParameter(
+                "Brain Hub service is already starting or running"
+            ) from exc
+        try:
+            yield
+        finally:
+            release_mutex(handle)
+            close_handle(handle)
+        return
+
     runtime = _runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
     handle = _service_lock_path().open("a+b")
@@ -408,6 +513,9 @@ def _service_lock() -> Iterator[None]:
 
 
 def _service_lock_is_held() -> bool:
+    if os.name == "nt":
+        return _windows_service_mutex_is_held()
+
     runtime = _runtime_dir()
     runtime.mkdir(parents=True, exist_ok=True)
     with _service_lock_path().open("a+b") as handle:
