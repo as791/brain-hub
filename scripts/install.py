@@ -1205,6 +1205,19 @@ def _same_path(left: str | Path, right: str | Path) -> bool:
         return False
 
 
+def _marketplace_offers_plugin(root: str | Path, plugin_name: str) -> bool:
+    manifest_path = Path(root).expanduser() / ".agents" / "plugins" / "marketplace.json"
+    try:
+        manifest = json.loads(manifest_path.read_text("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError, AttributeError):
+        return False
+    plugins = manifest.get("plugins")
+    return isinstance(plugins, list) and any(
+        isinstance(entry, dict) and entry.get("name") == plugin_name
+        for entry in plugins
+    )
+
+
 def _marketplace_registration_state(
     payload: dict[str, Any],
     marketplace_name: str,
@@ -1213,6 +1226,14 @@ def _marketplace_registration_state(
     entries = payload.get("marketplaces")
     if not isinstance(entries, list):
         return "unknown"
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("name") == marketplace_name:
+            continue
+        configured_source = _local_marketplace_source(entry)
+        if configured_source and _marketplace_offers_plugin(
+            configured_source, PLUGIN_NAME
+        ):
+            return "alternate"
     matches = [
         entry
         for entry in entries
@@ -1573,6 +1594,12 @@ def register_codex_plugin(
                 "Codex registration was left unchanged"
             )
             return "marketplace-conflict"
+        if state == "alternate":
+            reporter.skip(
+                "Brain Hub is already supplied by another registered marketplace; "
+                "the managed duplicate was not installed"
+            )
+            return "alternate-marketplace"
         marketplace_verified = state == "verified"
     elif marketplace_list.returncode != 0:
         output = _command_output(marketplace_list)

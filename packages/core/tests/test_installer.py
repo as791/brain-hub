@@ -1073,6 +1073,68 @@ def test_codex_registration_rejects_a_different_managed_marketplace_path(
     )
 
     assert result == "marketplace-conflict"
+
+
+def test_codex_registration_does_not_duplicate_an_alternate_brainhub_marketplace(
+    tmp_path: Path,
+) -> None:
+    managed = tmp_path / "managed"
+    alternate = tmp_path / "checkout"
+    marketplace_manifest = alternate / ".agents" / "plugins" / "marketplace.json"
+    marketplace_manifest.parent.mkdir(parents=True)
+    marketplace_manifest.write_text(
+        json.dumps(
+            {
+                "name": "brain-hub",
+                "plugins": [{"name": "brain-hub", "source": "./plugins/brain-hub"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def registration_runner(
+        command: list[str],
+        **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                {
+                    "marketplaces": [
+                        {
+                            "name": "brain-hub",
+                            "root": str(alternate),
+                            "marketplaceSource": {
+                                "sourceType": "local",
+                                "source": str(alternate),
+                            },
+                        }
+                    ]
+                }
+            ),
+            "",
+        )
+
+    result = install.register_codex_plugin(
+        managed,
+        install.Reporter(io.StringIO()),
+        runner=registration_runner,
+        which=lambda _name: "/usr/local/bin/codex",
+    )
+
+    assert result == "alternate-marketplace"
+    assert commands == [
+        [
+            "/usr/local/bin/codex",
+            "plugin",
+            "marketplace",
+            "list",
+            "--json",
+        ]
+    ]
     assert len(commands) == 1
 
 
