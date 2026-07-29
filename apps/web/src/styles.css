@@ -589,6 +589,36 @@ button:disabled { cursor: not-allowed; opacity: 0.45; }
 .toast p { margin: 0; color: #ffd7de; font-size: 10px; line-height: 1.4; }
 .toast button { border: 0; color: var(--muted); background: transparent; font-size: 17px; }
 
+.orchestrator-button { min-height: 34px; padding: 7px 11px; border: 1px solid rgba(86,228,255,.38); border-radius: 7px; color: var(--cyan); background: rgba(86,228,255,.06); font: 700 9px var(--mono); }
+.orchestrator-panel { position: fixed; z-index: 70; top: 58px; right: 0; bottom: 0; width: min(480px, 100%); overflow-y: auto; padding: 20px; border-left: 1px solid var(--line-strong); background: rgba(5,13,18,.98); box-shadow: -24px 0 60px rgba(0,0,0,.5); }
+.orchestrator-panel > header, .orchestrator-jobs article > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.orchestrator-panel h2 { margin: 3px 0 0; font-size: 21px; }
+.orchestrator-intro, .orchestrator-panel form > p, .orchestrator-jobs article > p { color: var(--muted); font-size: 10px; line-height: 1.55; }
+.orchestrator-panel form { display: grid; gap: 12px; margin-top: 18px; }
+.orchestrator-panel textarea { min-height: 130px; resize: vertical; padding: 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: #e8faff; background: rgba(255,255,255,.025); font: 11px/1.55 var(--sans); }
+.orchestrator-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.orchestrator-grid label { display: grid; gap: 5px; color: var(--dim); font: 8px var(--mono); text-transform: uppercase; }
+.orchestrator-grid input, .orchestrator-grid select { min-width: 0; height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 6px; color: #cae3e8; background: #0b171d; font: 9px var(--mono); }
+.orchestrator-grid .workspace-field { grid-column: 1 / -1; }
+.orchestrator-panel .work-warning { margin: 0; padding: 9px; border: 1px solid rgba(255,190,90,.25); border-radius: 6px; color: #f2c578; background: rgba(255,190,90,.05); }
+.orchestrator-jobs { display: grid; gap: 9px; margin-top: 18px; }
+.orchestrator-jobs article { padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.018); }
+.orchestrator-jobs strong, .orchestrator-jobs span { font: 8px var(--mono); text-transform: uppercase; }
+.orchestrator-jobs span[data-status='completed'] { color: #65e6a2; }
+.orchestrator-jobs span[data-status='failed'] { color: var(--danger); }
+.orchestrator-jobs pre { max-height: 320px; overflow: auto; margin: 12px 0 0; color: #c9dde2; white-space: pre-wrap; font: 10px/1.55 var(--mono); }
+
+.work-status { position: relative; z-index: 9; display: flex; gap: 7px; padding: 8px 14px; overflow-x: auto; border-bottom: 1px solid var(--line); background: rgba(5,13,18,.72); }
+.work-status header { display: grid; flex: 0 0 145px; align-content: center; gap: 3px; }
+.work-status header strong { color: var(--cyan); font: 9px var(--mono); text-transform: uppercase; }
+.work-status header span { color: var(--dim); font-size: 8px; }
+.work-status button { display: grid; grid-template-columns: auto minmax(110px,1fr); flex: 0 0 230px; gap: 3px 7px; padding: 8px; border: 1px solid var(--line); border-radius: 7px; text-align: left; background: rgba(255,255,255,.02); }
+.work-status button > span { color: #f2c578; font: 7px var(--mono); text-transform: uppercase; }
+.work-status button > span[data-state='passed'], .work-status button > span[data-state='completed'] { color: #65e6a2; }
+.work-status button > span[data-state='failed'], .work-status button > span[data-state='blocked'] { color: var(--danger); }
+.work-status button strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.work-status button small { grid-column: 1 / -1; overflow: hidden; color: var(--dim); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 1000px) {
   .topbar { grid-template-columns: 210px 1fr auto; }
   .topbar::after { left: 210px; }

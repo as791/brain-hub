@@ -12,7 +12,7 @@ optional console, `brainhub status` to inspect it, and `brainhub stop` to stop i
 
 Use the macOS/Linux or Windows one-command installer in the repository README. It
 creates an isolated runtime keyed by the Brain Hub source fingerprint and Python
-compatibility, generates an absolute MCP executable path in the installed plugin copy,
+compatibility, installs a stable `brainhub` launcher on the user PATH,
 registers the marketplace and plugin when the Codex CLI is available, and installs
 every adapter command. Third-party packages resolve from declared version ranges at
 installation time, so the preview runtime is source-addressed rather than a
@@ -20,7 +20,7 @@ bit-for-bit reproducible artifact. No separate `make`, `pip`, Node, or npm step 
 required. Restart Codex after installation.
 
 The installed manifest gets a deterministic source cachebuster so an upgrade refreshes
-Codex's plugin cache and absolute MCP path. The plugin itself has no remote credentials;
+Codex's plugin cache and portable MCP command. The plugin itself has no remote credentials;
 the local process owns encryption keys and data access.
 
 Run the read-only prerequisite check with:

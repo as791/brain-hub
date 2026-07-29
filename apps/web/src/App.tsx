@@ -5,6 +5,8 @@ import { DetailsDrawer } from './components/DetailsDrawer'
 import { Filters } from './components/Filters'
 import { GraphScene } from './components/GraphScene'
 import { Timeline } from './components/Timeline'
+import { OrchestratorPanel } from './components/OrchestratorPanel'
+import { WorkStatusPanel } from './components/WorkStatusPanel'
 import { useReducedMotion, useWebGLSupport } from './hooks/useMedia'
 import {
   applySceneBudget,
@@ -17,8 +19,8 @@ import {
   localSearch,
   MAX_GRAPH_HOPS,
   shortestPath,
-  topDownPath,
-  topDownSubgraph,
+  associativePath,
+  associativeSubgraph,
 } from './lib/graph'
 import type {
   BrainNode,
@@ -47,6 +49,7 @@ function App() {
     window.matchMedia?.('(max-width: 720px)').matches ? '2d' : '3d',
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [orchestratorOpen, setOrchestratorOpen] = useState(false)
   const [tokenDraft, setTokenDraft] = useState('')
   const [tokenRevision, setTokenRevision] = useState(0)
   const [anchorId, setAnchorId] = useState(demoGraph.anchorId ?? demoGraph.nodes[0].id)
@@ -157,6 +160,7 @@ function App() {
       }
       if (event.key === 'Escape') {
         setSettingsOpen(false)
+        setOrchestratorOpen(false)
         setSelectedId(undefined)
         setPath(null)
       }
@@ -182,7 +186,7 @@ function App() {
     return { ...timeGraph, nodes, edges }
   }, [anchorId, hiddenConfidence, hiddenKinds, timeGraph])
   const neighborhood = useMemo(
-    () => searchGraph ?? topDownSubgraph(filteredGraph, anchorId, hops),
+    () => searchGraph ?? associativeSubgraph(filteredGraph, anchorId, hops),
     [anchorId, filteredGraph, hops, searchGraph],
   )
   const visibleGraph = useMemo(
@@ -218,13 +222,13 @@ function App() {
         })
         // The REST response ranks nodes; keep the complete strict neighborhood
         // visible so intermediate evidence paths are never dropped from context.
-        const projection = topDownSubgraph(filteredGraph, anchorId, hops)
+        const projection = associativeSubgraph(filteredGraph, anchorId, hops)
         const visibleIds = new Set(projection.nodes.map((node) => node.id))
         setSearchGraph(projection)
         setHits(response.hits.filter((hit) => visibleIds.has(hit.node.id)))
       } else {
         const result = localSearch(filteredGraph, query, anchorId, hops)
-        const projection = topDownSubgraph(filteredGraph, anchorId, hops)
+        const projection = associativeSubgraph(filteredGraph, anchorId, hops)
         const visibleIds = new Set(projection.nodes.map((node) => node.id))
         setSearchGraph(projection)
         setHits(result.hits.filter((hit) => visibleIds.has(hit.node.id)).slice(0, 80))
@@ -237,7 +241,7 @@ function App() {
   }
 
   const navigateToNode = (node: BrainNode) => {
-    const segment = topDownPath(filteredGraph, anchorId, node.id, hops)
+    const segment = associativePath(filteredGraph, anchorId, node.id, hops)
     setAnchorId(node.id)
     setSelectedId(node.id)
     setNavigationPath((current) => {
@@ -346,6 +350,7 @@ function App() {
           <span className="status-copy">{connectionMessage}</span>
         </div>
         <div className="topbar__actions">
+          <button type="button" className="orchestrator-button" aria-expanded={orchestratorOpen} onClick={() => setOrchestratorOpen((open) => !open)}>✦ Ask Brain Hub</button>
           <div className="scene-switcher" role="group" aria-label="Graph rendering mode">
             {(['3d', '2d', 'list'] as SceneMode[]).map((mode) => (
               <button
@@ -429,18 +434,18 @@ function App() {
             <div className="anchor-control">
               <span className="anchor-control__pulse" aria-hidden="true" />
               <div>
-                <small>Starting at</small>
+                <small>Focus node</small>
                 <strong>{anchorNode?.label ?? 'No anchor'}</strong>
               </div>
             </div>
             <label className="hop-control">
               <button
                 type="button"
-                aria-label="Collapse one hierarchy level"
+                aria-label="Reduce neighborhood radius by one hop"
                 disabled={hops <= 1}
                 onClick={() => changeHops(Math.max(1, hops - 1))}
               >−</button>
-              <span>Visible depth</span>
+              <span>Neighborhood radius</span>
               <select value={hops} onChange={(event) => changeHops(Number(event.currentTarget.value))}>
                 {Array.from({ length: MAX_GRAPH_HOPS }, (_, index) => index + 1).map((depth) => (
                   <option key={depth} value={depth}>{depth} hop{depth === 1 ? '' : 's'}</option>
@@ -448,14 +453,14 @@ function App() {
               </select>
               <button
                 type="button"
-                aria-label="Expand one hierarchy level"
+                aria-label="Expand neighborhood radius by one hop"
                 disabled={hops >= MAX_GRAPH_HOPS}
                 onClick={() => changeHops(Math.min(MAX_GRAPH_HOPS, hops + 1))}
               >+</button>
             </label>
           </div>
 
-          <nav className="graph-breadcrumbs" aria-label="Hierarchy path">
+          <nav className="graph-breadcrumbs" aria-label="Exploration trail">
             {navigationPath.map((nodeId, index) => {
               const node = sourceGraph.nodes.find((candidate) => candidate.id === nodeId)
               if (!node) return null
@@ -478,10 +483,12 @@ function App() {
           <div className="graph-meta" aria-live="polite">
             <div><strong>{visibleGraph.nodes.length}</strong><span>nodes</span></div>
             <div><strong>{visibleGraph.edges.length}</strong><span>edges</span></div>
-            <div className="strict-badge"><span>↓</span> top-down · directed children</div>
+            <div className="strict-badge"><span>↔</span> associative · bidirectional traversal</div>
             {visibleGraph.truncated && <div className="budget-badge">Scene budget applied</div>}
             {reducedMotion && <div className="budget-badge">Reduced motion</div>}
           </div>
+
+          <WorkStatusPanel graph={filteredGraph} onSelect={navigateToNode} />
 
           {hits.length > 0 && (
             <section className="search-results" aria-label="Search results">
@@ -552,6 +559,8 @@ function App() {
           onSelect={navigateToNode}
         />
       </main>
+
+      {orchestratorOpen && <OrchestratorPanel anchorId={anchorId || undefined} hops={hops} onClose={() => setOrchestratorOpen(false)} onError={setError} />}
 
       {error && (
         <div className="toast" role="alert">

@@ -55,7 +55,7 @@ export interface BrainNode {
   vx?: number
   vy?: number
   vz?: number
-  hierarchyDepth?: number
+  neighborhoodDepth?: number
 }
 
 /** The renderer may replace endpoint ids with node objects at runtime. */
@@ -148,4 +148,37 @@ export type SceneMode = '3d' | '2d' | 'list'
 export interface SceneBudget {
   maxNodes: number
   maxEdges: number
+}
+
+export type AgentName = 'codex' | 'claude'
+export type AgentMode = 'ask' | 'work'
+
+export interface OrchestratorJob {
+  id: string
+  agent: AgentName
+  mode: AgentMode
+  workspace: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  createdAt: string
+  updatedAt: string
+  copyIndex: number
+  exitCode?: number | null
+  output: string
+}
+
+export interface OrchestratorCapabilities {
+  agents: Record<AgentName, boolean>
+  defaultWorkspace: string
+  maxCopies: number
+  modes: AgentMode[]
+}
+
+export interface OrchestratorRequest {
+  prompt: string
+  agent: AgentName
+  mode: AgentMode
+  workspace: string
+  copies: number
+  anchorId?: string
+  hops: number
 }

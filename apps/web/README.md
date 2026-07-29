@@ -38,14 +38,14 @@ For runtime authentication, use the connection settings in the header. The token
 
 ## Interaction contract
 
-- Search is always rooted in a directed source-to-target child hierarchy with an explicit
-  depth from one to 20. There is no silent global fallback.
-- Clicking a node immediately drills into its child hierarchy. Breadcrumbs retain the
-  complete route from the original root and let the user move back up.
-- The visible hierarchy is a cycle-safe breadth-first spanning tree. Cross-links and
-  incoming relationships remain available in node details without distorting depth.
-- Depth controls expand or collapse one level at a time, and the 2D/3D renderers place
-  each level in a top-down DAG layout.
+- Search is rooted in a bidirectional associative neighborhood with an explicit radius
+  from one to 20 hops. There is no silent global fallback.
+- Clicking a node makes it the focus. The exploration trail retains the shortest semantic
+  path so navigation remains reversible.
+- The visible graph retains incoming links, outgoing links, and cross-links. Nodes hold
+  information while edges hold relation, explanation, confidence, provenance, and evidence.
+- Radius controls expand or contract the neighborhood one hop at a time. The 2D/3D
+  renderers use force-directed layouts resembling an associative neural network.
 - “Explain path” highlights the evidence path from the current anchor and shows its confidence floor.
 - The renderer caps a scene at 2,000 nodes and 10,000 edges. The daemon should cluster or page larger projections.
 - WebGL failure switches to 2D. The List view is available at all times and supports keyboard navigation.

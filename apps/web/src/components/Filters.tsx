@@ -67,7 +67,7 @@ export function Filters({
 
       <div className="filter-note">
         <span className="filter-note__mark">↳</span>
-          <p>Search follows directed child links from the current hierarchy root.</p>
+          <p>Search follows incoming and outgoing semantic connections around the focus node.</p>
       </div>
     </aside>
   )

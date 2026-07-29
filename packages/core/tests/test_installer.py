@@ -583,7 +583,7 @@ def test_windows_shims_and_hkcu_path_are_idempotent(tmp_path: Path) -> None:
     assert registry.path == str(bin_dir)
 
 
-def test_installed_plugin_uses_absolute_managed_launcher_without_mutating_source(
+def test_installed_plugin_uses_path_launcher_without_mutating_source(
     tmp_path: Path,
 ) -> None:
     source = make_checkout(tmp_path / "checkout")
@@ -604,8 +604,7 @@ def test_installed_plugin_uses_absolute_managed_launcher_without_mutating_source
         (marketplace / "plugins" / "brain-hub" / ".mcp.json").read_text("utf-8")
     )
     server = installed_config["mcpServers"]["brain-hub"]
-    assert Path(server["command"]).is_absolute()
-    assert server["command"] == str(executable.resolve())
+    assert server["command"] == "brainhub"
     assert server["args"] == ["_plugin-mcp"]
     assert source_config.read_text("utf-8") == original
     installed_marketplace = json.loads(

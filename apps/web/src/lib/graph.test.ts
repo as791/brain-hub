@@ -8,8 +8,8 @@ import {
   localSearch,
   MAX_GRAPH_HOPS,
   shortestPath,
-  topDownPath,
-  topDownSubgraph,
+  associativePath,
+  associativeSubgraph,
 } from './graph'
 
 describe('temporal graph projection', () => {
@@ -61,36 +61,34 @@ describe('strict anchored traversal', () => {
   })
 })
 
-describe('top-down hierarchy traversal', () => {
-  it('follows source-to-target child edges and excludes incoming parents', () => {
-    const hierarchy = topDownSubgraph(demoGraph, 'ws-brain', 1)
+describe('bidirectional associative traversal', () => {
+  it('follows both incoming and outgoing connections', () => {
+    const neighborhood = associativeSubgraph(demoGraph, 'ws-brain', 1)
 
-    expect(hierarchy.nodes.map((node) => node.id)).toEqual([
-      'ws-brain',
-      'topic-capture',
-      'topic-graph',
-      'topic-search',
-      'decision-local',
-    ])
-    expect(hierarchy.nodes.some((node) => node.id === 'actor-user')).toBe(false)
-    expect(hierarchy.edges.every((edge) => endpointId(edge.source) === 'ws-brain')).toBe(true)
+    expect(neighborhood.nodes.some((node) => node.id === 'topic-graph')).toBe(true)
+    expect(neighborhood.nodes.some((node) => node.id === 'actor-user')).toBe(true)
+    expect(neighborhood.edges.some((edge) => endpointId(edge.target) === 'ws-brain')).toBe(true)
+    expect(neighborhood.edges.some((edge) => endpointId(edge.source) === 'ws-brain')).toBe(true)
   })
 
-  it('builds one cycle-safe spanning tree and records each node depth', () => {
-    const hierarchy = topDownSubgraph(demoGraph, 'ws-brain', 20)
+  it('retains cross-links and records each node distance from focus', () => {
+    const neighborhood = associativeSubgraph(demoGraph, 'ws-brain', 20)
 
-    expect(hierarchy.edges).toHaveLength(hierarchy.nodes.length - 1)
-    expect(hierarchy.nodes.find((node) => node.id === 'decision-sqlite')?.hierarchyDepth).toBe(2)
-    expect(new Set(hierarchy.nodes.map((node) => node.id)).size).toBe(hierarchy.nodes.length)
+    expect(neighborhood.edges.length).toBeGreaterThanOrEqual(neighborhood.nodes.length - 1)
+    expect(neighborhood.nodes.find((node) => node.id === 'decision-sqlite')?.neighborhoodDepth).toBe(2)
+    expect(new Set(neighborhood.nodes.map((node) => node.id)).size).toBe(neighborhood.nodes.length)
   })
 
-  it('returns the complete breadcrumb segment to a descendant', () => {
-    expect(topDownPath(demoGraph, 'ws-brain', 'decision-sqlite', 20)).toEqual([
+  it('returns a path regardless of stored edge direction', () => {
+    expect(associativePath(demoGraph, 'ws-brain', 'decision-sqlite', 20)).toEqual([
       'ws-brain',
       'topic-graph',
       'decision-sqlite',
     ])
-    expect(topDownPath(demoGraph, 'ws-brain', 'actor-user', 20)).toBeNull()
+    expect(associativePath(demoGraph, 'ws-brain', 'actor-user', 20)).toEqual([
+      'ws-brain',
+      'actor-user',
+    ])
   })
 })
 

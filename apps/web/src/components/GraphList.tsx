@@ -15,8 +15,8 @@ export function GraphList({ graph, anchorId, selectedId, onSelect }: GraphListPr
   return (
     <div className="graph-list" role="region" aria-label="Knowledge graph as an accessible list">
       <div className="graph-list__intro">
-        <span>Top-down hierarchy</span>
-        <p>Nodes are ordered from the current root through each visible child level.</p>
+        <span>Associative neighborhood</span>
+        <p>Each node carries information; every connection explains how two ideas relate.</p>
       </div>
       <ol>
         {graph.nodes.map((node) => {
@@ -28,8 +28,8 @@ export function GraphList({ graph, anchorId, selectedId, onSelect }: GraphListPr
                 <span className="graph-list__label">
                   <strong>{node.label}</strong>
                   <small>
-                    Level {node.hierarchyDepth ?? 0} · {node.kind}
-                    {node.id === anchorId ? ' · current root' : ''}
+                    {node.neighborhoodDepth ?? 0} hop{node.neighborhoodDepth === 1 ? '' : 's'} · {node.kind}
+                    {node.id === anchorId ? ' · focus node' : ''}
                   </small>
                 </span>
                 <span className="graph-list__count">{linked.length}</span>

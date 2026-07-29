@@ -30,6 +30,10 @@ class KeyringUnavailableError(KeyUnavailableError):
     """The operating-system keyring backend cannot currently be used."""
 
 
+class KeyNotFoundError(KeyUnavailableError):
+    """No key exists yet for this installation."""
+
+
 def _installation_digest(service: str, installation_id: str) -> str:
     return hashlib.sha256(f"{service}\0{installation_id}".encode("utf-8")).hexdigest()
 
@@ -294,7 +298,7 @@ class KeyringKeyProvider:
             raise KeyringUnavailableError("OS keychain is unavailable") from exc
         if not encoded:
             if not create:
-                raise KeyUnavailableError("stored OS keychain master key is missing")
+                raise KeyNotFoundError("stored OS keychain master key is missing")
             try:
                 with _exclusive_file_lock(self.lock_path):
                     encoded = keyring.get_password(
@@ -462,6 +466,18 @@ class DefaultKeyProvider:
                 return self.keyring.get_existing_key()
             if choice == self.LOCAL_FILE_CHOICE:
                 return self.local_file.get_existing_key()
+
+            # A provider marker was introduced after early Brain Hub releases.
+            # Reinstalls must adopt an already-existing OS key before headless
+            # first-use policy is allowed to create a new local fallback.
+            if not self._keyring_was_injected:
+                try:
+                    key = self.keyring.get_existing_key()
+                except (KeyNotFoundError, KeyringUnavailableError):
+                    pass
+                else:
+                    self._persist_provider_choice(self.KEYRING_CHOICE)
+                    return key
 
             if (
                 not self._keyring_was_injected

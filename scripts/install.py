@@ -1024,7 +1024,7 @@ def install_plugin_copy(
             "mcpServers": {
                 PLUGIN_NAME: {
                     "type": "stdio",
-                    "command": str(brainhub_executable.resolve()),
+                    "command": "brainhub",
                     "args": ["_plugin-mcp"],
                 }
             }

@@ -414,6 +414,29 @@ def test_headless_reopen_honors_pinned_default_keyring_and_fails_closed(
     assert not reopened.local_file.key_path.exists()
 
 
+def test_headless_upgrade_adopts_existing_keyring_before_local_fallback(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.delenv("BRAINHUB_MASTER_KEY", raising=False)
+    monkeypatch.setenv("BRAINHUB_HEADLESS", "true")
+    expected = bytes(range(32))
+    monkeypatch.setattr(
+        KeyringKeyProvider,
+        "get_existing_key",
+        lambda _self: expected,
+    )
+
+    provider = DefaultKeyProvider(
+        "upgraded-headless-installation",
+        state_dir=tmp_path / "keys",
+    )
+
+    assert provider.get_key() == expected
+    assert provider.provider_path.read_bytes() == provider.KEYRING_CHOICE
+    assert not provider.local_file.key_path.exists()
+
+
 def test_default_key_provider_falls_back_once_and_keeps_the_same_local_key(
     monkeypatch,
     tmp_path,

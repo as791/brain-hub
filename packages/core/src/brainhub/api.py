@@ -26,6 +26,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validato
 
 from .graph import EvidenceGraph, GraphBoundsError, GraphNotFoundError
 from .models import BrainEvent, FeedbackRequest, NodeType
+from .orchestrator import AgentOrchestrator, OrchestratorRequest
 from .policy import CapturePolicyError
 from .service import BrainHubService
 from .store import EventIntegrityError, ProjectionIntegrityError
@@ -113,6 +114,7 @@ def create_app(
     service: BrainHubService,
     *,
     settings: ApiSettings | None = None,
+    orchestrator: AgentOrchestrator | None = None,
 ) -> FastAPI:
     config = settings or ApiSettings()
     app = FastAPI(
@@ -121,6 +123,12 @@ def create_app(
         description="Local-first evidence-backed memory graph for AI agents.",
     )
     app.state.brainhub = service
+    app.state.orchestrator = orchestrator
+
+    def get_orchestrator() -> AgentOrchestrator:
+        if app.state.orchestrator is None:
+            app.state.orchestrator = AgentOrchestrator()
+        return app.state.orchestrator
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(config.allowed_origins),
@@ -314,6 +322,39 @@ def create_app(
             valid_at=body.valid_at,
         )
 
+    @app.get("/v1/orchestrator/capabilities")
+    def orchestrator_capabilities():
+        return get_orchestrator().capabilities()
+
+    @app.get("/v1/orchestrator/jobs")
+    def orchestrator_jobs(limit: Annotated[int, Query(ge=1, le=100)] = 50):
+        return {"jobs": get_orchestrator().list(limit)}
+
+    @app.get("/v1/orchestrator/jobs/{job_id}")
+    def orchestrator_job(job_id: str):
+        job = get_orchestrator().get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="orchestration job not found")
+        return job
+
+    @app.post("/v1/orchestrator/jobs", status_code=202)
+    def start_orchestrator_job(request: Request, body: OrchestratorRequest):
+        if not _is_loopback(request):
+            raise HTTPException(status_code=403, detail="agent orchestration is loopback-only")
+        context = ""
+        if body.anchor_id:
+            neighborhood = service.expand(
+                body.anchor_id,
+                hops=body.hops,
+                node_limit=100,
+                edge_limit=250,
+            )
+            context = _orchestration_context(neighborhood)
+        try:
+            return {"jobs": get_orchestrator().start(body, context=context)}
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.post("/v1/feedback")
     def feedback(body: FeedbackRequest):
         return service.feedback(body)
@@ -394,3 +435,25 @@ def create_app(
             service.unsubscribe(queue)
 
     return app
+
+
+def _orchestration_context(neighborhood: object) -> str:
+    """Render a compact graph neighborhood while keeping graph text non-authoritative."""
+    value = neighborhood.model_dump(mode="json") if isinstance(neighborhood, BaseModel) else neighborhood
+    if not isinstance(value, dict):
+        return ""
+    graph = value.get("graph", value)
+    if not isinstance(graph, dict):
+        return ""
+    lines: list[str] = []
+    for node in graph.get("nodes", [])[:100]:
+        if isinstance(node, dict):
+            lines.append(f"NODE {node.get('id')}: {node.get('label', node.get('title', ''))} — {node.get('summary', '')}")
+    for edge in graph.get("edges", graph.get("links", []))[:250]:
+        if isinstance(edge, dict):
+            lines.append(
+                f"EDGE {edge.get('source_id', edge.get('source'))} -> "
+                f"{edge.get('target_id', edge.get('target'))}: "
+                f"{edge.get('relation', edge.get('kind', 'related'))} — {edge.get('explanation', '')}"
+            )
+    return "\n".join(lines)[:40_000]

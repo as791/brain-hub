@@ -15,14 +15,50 @@ from brainhub.crypto import ContentCipher, MemoryKeyProvider
 from brainhub.demo import seed_demo
 from brainhub.graph import GraphNotFoundError
 from brainhub.models import BrainEvent
+from brainhub.orchestrator import OrchestratorJob
 from brainhub.policy import CapturePolicyError
 from brainhub.projector import SUPPORTED_EVENT_TYPES
 from brainhub.redaction import contains_absolute_path, redact_text
 from brainhub.service import BrainHubService
 from brainhub.store import DemoResetRefused, EventStore
-
 from brainhub_adapters.normalize import normalize_capture
 
+
+class FakeOrchestrator:
+    def __init__(self):
+        self.requests = []
+
+    def capabilities(self):
+        return {"agents": {"codex": True, "claude": False}, "default_workspace": "/tmp"}
+
+    def list(self, _limit=50):
+        return []
+
+    def get(self, _job_id):
+        return None
+
+    def start(self, request, *, context=""):
+        self.requests.append((request, context))
+        now = datetime.now(UTC)
+        return [OrchestratorJob(id="job1", agent=request.agent, mode=request.mode,
+            workspace=request.workspace, status="queued", created_at=now, updated_at=now,
+            prompt_hash="hash")]
+
+
+def test_orchestrator_starts_local_agent_and_rejects_remote(service):
+    orchestrator = FakeOrchestrator()
+    app = create_app(service, orchestrator=orchestrator)
+    local = TestClient(app, client=("127.0.0.1", 51234))
+    remote = TestClient(app, client=("198.51.100.23", 51234))
+    body = {"prompt": "Review this", "agent": "codex", "mode": "ask", "workspace": "/tmp"}
+
+    accepted = local.post("/v1/orchestrator/jobs", json=body)
+    denied = remote.post("/v1/orchestrator/jobs", json=body)
+
+    assert accepted.status_code == 202
+    assert accepted.json()["jobs"][0]["id"] == "job1"
+    assert orchestrator.requests[0][0].prompt == "Review this"
+    assert denied.status_code == 403
 
 def adapter_event(**overrides):
     payload = {

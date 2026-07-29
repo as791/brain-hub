@@ -49,8 +49,6 @@ export function Graph2D({
       height={height}
       graphData={{ nodes: graph.nodes, links: graph.edges }}
       nodeId="id"
-      dagMode="td"
-      dagLevelDistance={90}
       nodeLabel={(rawNode) => `${(rawNode as BrainNode).label} · ${(rawNode as BrainNode).kind}`}
       nodeCanvasObject={(rawNode, context, globalScale) => {
         const node = rawNode as BrainNode
@@ -85,8 +83,6 @@ export function Graph2D({
         return pathEdgeIds.has(edge.id) ? '#ffffff' : CONFIDENCE_COLORS[edge.confidenceClass]
       }}
       linkWidth={(rawLink) => pathEdgeIds.has((rawLink as BrainEdge).id) ? 3 : 0.8}
-      linkDirectionalArrowLength={4}
-      linkDirectionalArrowRelPos={0.86}
       backgroundColor="rgba(0,0,0,0)"
       enableNodeDrag={!reducedMotion}
       cooldownTicks={reducedMotion ? 1 : 110}

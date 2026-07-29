@@ -67,8 +67,6 @@ export function Graph3D({
       height={height}
       graphData={{ nodes: graph.nodes, links: graph.edges }}
       nodeId="id"
-      dagMode="td"
-      dagLevelDistance={85}
       nodeLabel={(rawNode) => nodeTooltip(rawNode as BrainNode)}
       nodeColor={(rawNode) => {
         const node = rawNode as BrainNode
@@ -86,8 +84,6 @@ export function Graph3D({
       }}
       linkWidth={(rawLink) => pathEdgeIds.has((rawLink as BrainEdge).id) ? 2.8 : 0.5 + (rawLink as BrainEdge).confidence}
       linkOpacity={0.48}
-      linkDirectionalArrowLength={3.2}
-      linkDirectionalArrowRelPos={0.82}
       linkCurvature={(rawLink) => {
         const edge = rawLink as BrainEdge
         const source = endpointId(edge.source)

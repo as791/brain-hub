@@ -7,6 +7,9 @@ import type {
   SearchRequest,
   SearchResponse,
   StreamEvent,
+  OrchestratorCapabilities,
+  OrchestratorJob,
+  OrchestratorRequest,
 } from './types'
 
 const trimSlash = (value: string) => value.replace(/\/$/, '')
@@ -46,6 +49,9 @@ export const API_PATHS = {
   expand: (nodeId: string) => `/v1/nodes/${encodeURIComponent(nodeId)}/expand`,
   path: '/v1/path',
   events: '/ws',
+  orchestratorCapabilities: '/v1/orchestrator/capabilities',
+  orchestratorJobs: '/v1/orchestrator/jobs',
+  orchestratorJob: (jobId: string) => `/v1/orchestrator/jobs/${encodeURIComponent(jobId)}`,
 } as const
 
 export class BrainHubApiError extends Error {
@@ -357,6 +363,23 @@ export const brainHubApi = {
       signal,
     )
     return normalizePath(response, sourceId, targetId)
+  },
+
+  async orchestratorCapabilities(signal?: AbortSignal): Promise<OrchestratorCapabilities> {
+    return camelize(await request(API_PATHS.orchestratorCapabilities, {}, signal)) as unknown as OrchestratorCapabilities
+  },
+
+  async startOrchestrator(input: OrchestratorRequest, signal?: AbortSignal): Promise<OrchestratorJob[]> {
+    const body = {
+      prompt: input.prompt, agent: input.agent, mode: input.mode, workspace: input.workspace,
+      copies: input.copies, anchor_id: input.anchorId, hops: input.hops,
+    }
+    const response = camelize(await request<unknown>(API_PATHS.orchestratorJobs, { method: 'POST', body: JSON.stringify(body) }, signal)) as { jobs: OrchestratorJob[] }
+    return response.jobs
+  },
+
+  async orchestratorJob(jobId: string, signal?: AbortSignal): Promise<OrchestratorJob> {
+    return camelize(await request(API_PATHS.orchestratorJob(jobId), {}, signal)) as unknown as OrchestratorJob
   },
 }
 

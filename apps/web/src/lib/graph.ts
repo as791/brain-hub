@@ -88,59 +88,32 @@ export function boundedSubgraph(
   }
 }
 
-export function topDownSubgraph(
+export function associativeSubgraph(
   snapshot: GraphSnapshot,
-  rootId: string,
-  depthLimit: number,
+  anchorId: string,
+  hopLimit: number,
 ): GraphSnapshot {
-  const nodeById = new Map(snapshot.nodes.map((node) => [node.id, node]))
-  if (!nodeById.has(rootId)) return { ...snapshot, nodes: [], edges: [] }
-
-  const depth = new Map<string, number>([[rootId, 0]])
-  const treeEdges: BrainEdge[] = []
-  let frontier = [rootId]
-  for (let level = 1; level <= depthLimit && frontier.length > 0; level += 1) {
-    const next: string[] = []
-    for (const parentId of frontier) {
-      for (const edge of snapshot.edges) {
-        if (endpointId(edge.source) !== parentId) continue
-        const childId = endpointId(edge.target)
-        if (!nodeById.has(childId) || depth.has(childId)) continue
-        depth.set(childId, level)
-        treeEdges.push(edge)
-        next.push(childId)
-      }
-    }
-    frontier = next
-  }
-
+  const neighborhood = boundedSubgraph(snapshot, anchorId, hopLimit)
+  const distance = graphDistance(neighborhood, anchorId)
   return {
-    ...snapshot,
-    anchorId: rootId,
-    nodes: [...depth].map(([id, hierarchyDepth]) => ({
-      ...nodeById.get(id)!,
-      hierarchyDepth,
-    })),
-    edges: treeEdges,
+    ...neighborhood,
+    nodes: neighborhood.nodes
+      .map((node) => ({ ...node, neighborhoodDepth: distance.get(node.id) ?? 0 }))
+      .sort((left, right) =>
+        (left.neighborhoodDepth ?? 0) - (right.neighborhoodDepth ?? 0) ||
+        right.confidence - left.confidence,
+      ),
   }
 }
 
-export function topDownPath(
+export function associativePath(
   snapshot: GraphSnapshot,
   sourceId: string,
   targetId: string,
-  depthLimit: number,
+  hopLimit: number,
 ): string[] | null {
-  const tree = topDownSubgraph(snapshot, sourceId, depthLimit)
-  if (!tree.nodes.some((node) => node.id === targetId)) return null
-  const parent = new Map(tree.edges.map((edge) => [endpointId(edge.target), endpointId(edge.source)]))
-  const path = [targetId]
-  while (path[0] !== sourceId) {
-    const parentId = parent.get(path[0])
-    if (!parentId) return null
-    path.unshift(parentId)
-  }
-  return path
+  const path = shortestPath(boundedSubgraph(snapshot, sourceId, hopLimit), sourceId, targetId)
+  return path ? [sourceId, ...path.steps.map((step) => step.to.id)] : null
 }
 
 export function graphDistance(snapshot: GraphSnapshot, anchorId: string): Map<string, number> {
