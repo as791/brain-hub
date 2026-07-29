@@ -24,6 +24,7 @@ from .projector import Projector
 from .policy import validate_capture_policy
 from .search import SearchIndex
 from .store import EventStore
+from .telemetry import configure_telemetry, traced
 
 
 class BrainHubService:
@@ -34,6 +35,7 @@ class BrainHubService:
         enable_semantic: bool = True,
         allow_raw_content: bool | None = None,
     ) -> None:
+        configure_telemetry()
         self.store = store
         self.projector = Projector(store)
         self.graph = EvidenceGraph(store)
@@ -46,6 +48,7 @@ class BrainHubService:
         )
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
 
+    @traced("refresh_graph_if_stale")
     def refresh_graph_if_stale(self) -> int:
         """Refresh a previously loaded graph cache without constructing search state."""
 
@@ -53,6 +56,7 @@ class BrainHubService:
         self.graph.refresh_if_loaded(observed)
         return observed
 
+    @traced("record")
     def record(self, event: BrainEvent | dict[str, Any]) -> RecordResponse:
         parsed = event if isinstance(event, BrainEvent) else BrainEvent.model_validate(event)
         validate_capture_policy(parsed, allow_raw_content=self.allow_raw_content)
@@ -72,6 +76,7 @@ class BrainHubService:
             projection_version=projection_version,
         )
 
+    @traced("search")
     def search(
         self,
         query: str,
@@ -108,9 +113,11 @@ class BrainHubService:
             node_types=node_types,
         )
 
+    @traced("get_node")
     def get_node(self, node_id: str):
         return self.store.get_node(node_id)
 
+    @traced("get_graph")
     def get_graph(
         self,
         *,
@@ -123,6 +130,7 @@ class BrainHubService:
             node_limit=node_limit, edge_limit=edge_limit, valid_at=valid_at
         )
 
+    @traced("expand")
     def expand(
         self,
         node_id: str,
@@ -143,6 +151,7 @@ class BrainHubService:
             valid_at=valid_at,
         )
 
+    @traced("path")
     def path(
         self,
         source_id: str,
@@ -161,6 +170,7 @@ class BrainHubService:
             valid_at=valid_at,
         )
 
+    @traced("feedback")
     def feedback(
         self,
         request: FeedbackRequest | dict[str, Any],
@@ -192,6 +202,7 @@ class BrainHubService:
         )
         return self.record(event)
 
+    @traced("import_graphify")
     def import_graphify(
         self,
         path: str | Path,
@@ -204,17 +215,21 @@ class BrainHubService:
         )
         return self.record(event)
 
+    @traced("next_sync_batch")
     def next_sync_batch(self, *, limit: int = 500) -> SyncBatch | None:
         return self.store.next_sync_batch(limit=limit)
 
+    @traced("acknowledge_sync")
     def acknowledge_sync(self, last_sequence: int) -> int:
         return self.store.acknowledge_sync(last_sequence)
 
+    @traced("subscribe")
     def subscribe(self, *, max_queue: int = 100) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=max_queue)
         self._subscribers.add(queue)
         return queue
 
+    @traced("unsubscribe")
     def unsubscribe(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         self._subscribers.discard(queue)
 
@@ -230,5 +245,6 @@ class BrainHubService:
                 except (asyncio.QueueEmpty, asyncio.QueueFull):
                     pass
 
+    @traced("close")
     def close(self) -> None:
         self.store.close()
