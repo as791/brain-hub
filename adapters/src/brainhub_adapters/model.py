@@ -2,18 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Mapping
-
-
-# CloudEvents permits producers to omit ``time``, but the Brain Hub adapter
-# contract requires it.  When a host does not expose an occurrence timestamp,
-# use an explicit sentinel instead of capture time: capture time changes on a
-# retry and would bind the same deterministic event ID to different content.
-UNKNOWN_EVENT_TIME = "1970-01-01T00:00:00Z"
 
 
 def canonical_json(value: Any) -> str:
@@ -22,13 +15,13 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def normalized_time(value: str | None) -> str:
+def normalized_time(value: str | None) -> str | None:
     if not value:
-        return UNKNOWN_EVENT_TIME
+        return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
-        return UNKNOWN_EVENT_TIME
+        return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -74,7 +67,7 @@ def make_event(
     event_type: str,
     subject: str,
     data: Mapping[str, Any],
-    occurred_at: str | None = None,
+    observed_at: str | None = None,
     event_key: str | None = None,
 ) -> CloudEvent:
     """Create an idempotent CloudEvent.
@@ -84,8 +77,13 @@ def make_event(
     identifier and is deduplicated by both the spool and the daemon.
     """
 
-    time = normalized_time(occurred_at)
-    identity = event_key or stable_digest(source, event_type, subject, data)
+    time = normalized_time(observed_at) or datetime.now(timezone.utc).isoformat().replace(
+        "+00:00", "Z"
+    )
+    identity_data = {
+        key: value for key, value in data.items() if key not in {"occurred_at", "observed_at"}
+    }
+    identity = event_key or stable_digest(source, event_type, subject, identity_data)
     event_id = f"evt_{stable_digest(source, event_type, subject, identity)[:40]}"
     return CloudEvent(
         specversion="1.0",
