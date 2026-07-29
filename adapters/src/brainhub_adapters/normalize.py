@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Mapping
 
-from .model import CloudEvent, make_event, stable_digest
+from .model import CloudEvent, make_event, normalized_time, stable_digest
 from .redaction import (
     artifact_references,
     explicit_summary,
@@ -192,6 +193,15 @@ def normalize_capture(
         },
     }
 
+    observed_at = safe_text(payload.get("observed_at"), limit=80)
+    source_time = occurred_at or safe_text(_first(payload, "time", "timestamp"), limit=80)
+    normalized_occurred_at = normalized_time(source_time)
+    if normalized_occurred_at:
+        data["occurred_at"] = normalized_occurred_at
+    data["observed_at"] = normalized_time(observed_at) or datetime.now(
+        timezone.utc
+    ).isoformat().replace("+00:00", "Z")
+
     version = safe_text(_first(payload, "agent_version", "version"), limit=80)
     if version:
         data["agent"]["version"] = version
@@ -223,7 +233,16 @@ def normalize_capture(
     if metadata:
         data["metadata"] = metadata
 
-    event_key_raw = _first(payload, "event_id", "hook_id", "invocation_id", "turn_id")
+    event_key_raw = _first(
+        payload,
+        "event_id",
+        "invocation_id",
+        "tool_use_id",
+        "tool_call_id",
+        "call_id",
+        "capture_id",
+        "hook_id",
+    )
     event_key = f"{event_name}:{event_key_raw}" if event_key_raw is not None else None
     event_type = f"com.brainhub.agent.run.{status}.v1"
     return make_event(
@@ -231,6 +250,6 @@ def normalize_capture(
         event_type=event_type,
         subject=f"sessions/{opaque_reference(session_id, prefix='session')}",
         data=data,
-        occurred_at=occurred_at or safe_text(_first(payload, "time", "timestamp"), limit=80),
+        observed_at=data["observed_at"],
         event_key=event_key,
     )

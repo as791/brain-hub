@@ -631,7 +631,7 @@ def test_websocket_polls_projection_version_for_external_process_writes(tmp_path
         writer.close()
 
 
-def test_recorded_time_uses_ingestion_not_unknown_occurrence_sentinel(service):
+def test_missing_occurrence_uses_observation_without_epoch(service):
     before = datetime.now(UTC)
     event = normalize_capture(
         "codex",
@@ -643,7 +643,9 @@ def test_recorded_time_uses_ingestion_not_unknown_occurrence_sentinel(service):
         },
         mode="hook",
     ).as_dict()
-    assert event["time"] == "1970-01-01T00:00:00Z"
+    observed_at = datetime.fromisoformat(event["time"].replace("Z", "+00:00"))
+    assert before <= observed_at <= datetime.now(UTC)
+    assert "occurred_at" not in event["data"]
     service.record(BrainEvent.model_validate(event))
     after = datetime.now(UTC)
     run = next(
@@ -651,7 +653,7 @@ def test_recorded_time_uses_ingestion_not_unknown_occurrence_sentinel(service):
         for node in service.store.list_nodes()
         if node.type.value == "RUN" and "unknown-time-session" in node.external_ids
     )
-    assert run.valid_time.start == datetime(1970, 1, 1, tzinfo=UTC)
+    assert run.valid_time.start == observed_at
     assert before <= run.recorded_time.start <= after
 
 

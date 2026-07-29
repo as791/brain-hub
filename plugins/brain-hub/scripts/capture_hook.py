@@ -3,20 +3,25 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
-
 
 MAX_STDIN_BYTES = 1_048_576
 SAFE_FIELDS = frozenset(
     {
         "agent_id",
         "agent_type",
+        "attempt",
+        "call_id",
+        "client_id",
         "cwd",
         "duration_ms",
         "event_id",
@@ -26,18 +31,36 @@ SAFE_FIELDS = frozenset(
         "model",
         "parent_session_id",
         "permission_mode",
-        "reason",
         "session_id",
         "source",
         "status",
         "time",
         "timestamp",
         "tool_name",
+        "tool_call_id",
+        "tool_use_id",
         "turn_id",
         "version",
         "workspace_id",
     }
 )
+
+NATIVE_INVOCATION_FIELDS = ("invocation_id", "tool_use_id", "tool_call_id", "call_id")
+
+
+def _capture_identity(payload: Mapping[str, Any], sequence: int) -> str:
+    parts = (
+        payload.get("client_id") or payload.get("source") or "codex",
+        payload.get("session_id"),
+        payload.get("turn_id"),
+        sequence,
+        payload.get("hook_event_name") or "unknown",
+        payload.get("attempt") or 1,
+    )
+    digest = hashlib.sha256(
+        json.dumps(parts, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    return f"cap_{digest[:40]}"
 
 
 def sanitized_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -54,6 +77,11 @@ def sanitized_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
     if event_name in {"subagentstart", "subagentstop"} and agent_id and session_id:
         safe["parent_session_id"] = session_id
         safe["session_id"] = agent_id
+    if not any(safe.get(field) for field in NATIVE_INVOCATION_FIELDS):
+        sequence = time.monotonic_ns()
+        safe["capture_sequence"] = sequence
+        safe["capture_id"] = _capture_identity(safe, sequence)
+    safe["observed_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return safe
 
 

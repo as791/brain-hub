@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from brainhub_adapters.normalize import normalize_capture
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -16,10 +15,12 @@ class ContractTests(unittest.TestCase):
 
     def test_retry_has_deterministic_id(self) -> None:
         payload = self.fixture("codex/session-complete.json")
+        payload["observed_at"] = "2026-07-30T10:00:00Z"
         first = normalize_capture("codex", payload)
         second = normalize_capture("codex", payload)
         self.assertEqual(first.id, second.id)
-        self.assertEqual(first.time, "1970-01-01T00:00:00Z")
+        self.assertEqual(first.time, "2026-07-30T10:00:00Z")
+        self.assertNotIn("occurred_at", first.data)
         self.assertEqual(first.to_json(), second.to_json())
         self.assertEqual(first.type, "com.brainhub.agent.run.completed.v1")
         self.assertRegex(first.type, r"^com\.brainhub\.[a-z0-9.]+\.v[1-9][0-9]*$")
@@ -63,13 +64,30 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(started.data["status"], "started")
         self.assertEqual(completed.data["status"], "completed")
 
-    def test_invalid_host_time_uses_stable_unknown_sentinel(self) -> None:
+    def test_invalid_host_time_uses_observation_time_without_epoch(self) -> None:
         payload = self.fixture("cursor/stop.json")
         payload["timestamp"] = "not-a-date"
+        payload["observed_at"] = "2026-07-30T10:00:00Z"
         first = normalize_capture("cursor", payload)
         second = normalize_capture("cursor", payload)
-        self.assertEqual(first.time, "1970-01-01T00:00:00Z")
+        self.assertEqual(first.time, "2026-07-30T10:00:00Z")
+        self.assertNotIn("occurred_at", first.data)
         self.assertEqual(first.to_json(), second.to_json())
+
+    def test_occurred_and_observed_times_are_distinct(self) -> None:
+        event = normalize_capture(
+            "codex",
+            {
+                "event": "stop",
+                "event_id": "timed-event",
+                "time": "2026-07-30T09:00:00Z",
+                "observed_at": "2026-07-30T10:00:00Z",
+            },
+        )
+
+        self.assertEqual(event.data["occurred_at"], "2026-07-30T09:00:00Z")
+        self.assertEqual(event.data["observed_at"], "2026-07-30T10:00:00Z")
+        self.assertEqual(event.time, "2026-07-30T10:00:00Z")
 
     def test_transcript_and_absolute_paths_are_not_serialized(self) -> None:
         payload = self.fixture("claude-code/session-end.json")
