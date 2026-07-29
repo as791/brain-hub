@@ -28,6 +28,7 @@ SAFE_FIELDS = frozenset(
         "permission_mode",
         "reason",
         "session_id",
+        "session_title",
         "source",
         "status",
         "time",

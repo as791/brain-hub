@@ -27,6 +27,7 @@ from brainhub.models import (
     BrainEvent,
     Edge,
     deterministic_event_id,
+    stable_id,
 )
 from brainhub.projector import Projector
 from brainhub.store import EventIntegrityError, EventStore, ProjectionIntegrityError
@@ -70,6 +71,72 @@ def test_deterministic_cloudevent_and_contract_validation():
     )
     with pytest.raises(ValidationError):
         BrainEvent.model_validate({**first.model_dump(), "type": "unversioned"})
+
+
+def test_event_contract_discards_private_capture_fields_and_sanitizes_title():
+    event = make_event(
+        session_title="Payments /Users/alice/private https://secret.example",
+        prompt="raw prompt",
+        tool_args={"token": "secret"},
+        tool_result="raw result",
+        command="curl https://secret.example",
+        path="/Users/alice/private",
+        url="https://secret.example",
+        headers={"Authorization": "Bearer secret"},
+    )
+    serialized = event.model_dump_json()
+    assert event.data.session_title == (
+        "Payments opaque://local-path [REDACTED_URL]"
+    )
+    for sensitive in ("raw prompt", "raw result", "curl", "Authorization", "secret.example"):
+        assert sensitive not in serialized
+
+
+def test_run_display_title_keeps_canonical_session_identity(tmp_path):
+    store = EventStore(tmp_path / "brain.db", ContentCipher(MemoryKeyProvider(bytes(range(32)))))
+    projector = Projector(store)
+    session_id = "550e8400-e29b-41d4-a716-446655440000"
+
+    explicit = make_event(session_id=session_id, session_title="Payments reliability")
+    store.append_event(explicit, projector)
+    run_id = stable_id("run", session_id)
+    run = store.get_node(run_id)
+    assert run is not None
+    assert run.id == run_id
+    assert run.external_ids == [session_id]
+    assert run.title == "Payments reliability"
+    assert run.properties["title_source"] == "explicit"
+
+    fallback_session = "550e8400-e29b-41d4-a716-446655440001"
+    fallback = make_event(session_id=fallback_session, summary=None)
+    store.append_event(fallback, projector)
+    generated = store.get_node(stable_id("run", fallback_session))
+    assert generated is not None
+    assert generated.title == "codex · 2026-07-17 10:00 UTC · completed run (generated)"
+    assert generated.properties["title_source"] == "generated-safe-metadata"
+    store.close()
+
+
+def test_open_migrates_only_legacy_generated_run_titles(tmp_path):
+    path = tmp_path / "brain.db"
+    key = bytes(range(32))
+    store = EventStore(path, ContentCipher(MemoryKeyProvider(key)))
+    event = make_event(session_id="legacy-session", run_title="codex run")
+    store.append_event(event, Projector(store))
+    run_id = stable_id("run", "legacy-session")
+    store.connection.execute(
+        "DELETE FROM metadata WHERE key = 'run_title_boundary_version'"
+    )
+    store.close()
+
+    reopened = EventStore(path, ContentCipher(MemoryKeyProvider(key)))
+    run = reopened.get_node(run_id)
+    assert run is not None
+    assert run.id == run_id
+    assert run.external_ids == ["legacy-session"]
+    assert run.title == "codex · 2026-07-17 10:00 UTC · completed run (generated)"
+    assert run.properties["title_source"] == "generated-safe-metadata"
+    reopened.close()
 
 
 def test_edge_requires_bounded_explanation_and_evidence():

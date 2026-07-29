@@ -18,6 +18,7 @@ from .models import (
     ReviewState,
     Sensitivity,
     TimeRange,
+    generated_run_title,
     stable_id,
 )
 from .redaction import redact_text
@@ -44,6 +45,16 @@ SUPPORTED_EVENT_TYPES = {
 class Projector:
     NAME = "canonical-graph"
     VERSION = "1.0.0"
+
+    @staticmethod
+    def _run_title(event: BrainEvent, extras: dict[str, Any]) -> tuple[str, str]:
+        explicit = event.data.session_title or extras.get("run_title")
+        if isinstance(explicit, str) and explicit.strip():
+            return redact_text(explicit.strip()[:120]), "explicit"
+        return (
+            generated_run_title(event.data.agent.product, event.time, event.data.status.value),
+            "generated-safe-metadata",
+        )
 
     def __init__(self, store: EventStore) -> None:
         self.store = store
@@ -182,6 +193,7 @@ class Projector:
             "com.brainhub.agent.run.unknown.v1",
         }
         if event.type in base_events:
+            run_title, run_title_source = self._run_title(event, extras)
             workspace = self._make_node(
                 event,
                 NodeType.WORKSPACE,
@@ -215,13 +227,14 @@ class Projector:
                 event,
                 NodeType.RUN,
                 run_id,
-                str(extras.get("run_title") or f"{event.data.agent.product} run"),
+                run_title,
                 event.data.summary or "Captured agent run",
                 external_ids=[event.data.session_id],
                 properties={
                     "status": event.data.status.value,
                     "turn_id": event.data.turn_id,
                     "workspace_id": workspace.id,
+                    "title_source": run_title_source,
                 },
             )
             for node in (workspace, actor, workstream, run):

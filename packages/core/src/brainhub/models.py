@@ -14,6 +14,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 EVENT_TYPE_RE = re.compile(r"^com\.brainhub\.[a-z0-9.]+\.v[1-9][0-9]*$")
+DISPLAY_URL_RE = re.compile(r"\b(?:https?|file)://\S+", re.IGNORECASE)
+PRIVATE_EVENT_FIELDS = {
+    "command",
+    "headers",
+    "path",
+    "prompt",
+    "tool_arguments",
+    "tool_args",
+    "tool_result",
+    "tool_results",
+    "url",
+}
 
 
 class NodeType(StrEnum):
@@ -122,10 +134,31 @@ class EventData(BaseModel):
     session_id: str = Field(min_length=1, max_length=256)
     turn_id: str | None = Field(default=None, max_length=256)
     parent_session_id: str | None = Field(default=None, max_length=256)
+    session_title: str | None = Field(default=None, min_length=1, max_length=120)
     status: EventStatus
     summary: str | None = Field(default=None, max_length=4000)
     artifacts: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     capture: CapturePolicy
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_private_capture_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        return {
+            key: child
+            for key, child in value.items()
+            if str(key).lower().replace("-", "_") not in PRIVATE_EVENT_FIELDS
+        }
+
+    @field_validator("session_title")
+    @classmethod
+    def sanitize_session_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        from .redaction import redact_text
+
+        return DISPLAY_URL_RE.sub("[REDACTED_URL]", redact_text(value.strip()))
 
 
 def canonical_json(value: Any) -> bytes:
@@ -160,6 +193,11 @@ def sha256_hex(value: Any) -> str:
 def stable_id(namespace: str, *parts: Any) -> str:
     digest = sha256_hex([namespace, *parts])
     return f"{namespace}:{digest[:32]}"
+
+
+def generated_run_title(client: str, occurred_at: datetime, category: str) -> str:
+    timestamp = occurred_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    return f"{client} · {timestamp} · {category} run (generated)"
 
 
 def deterministic_event_id(

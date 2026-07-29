@@ -22,6 +22,7 @@ from .models import (
     SyncBatch,
     SyncEvent,
     canonical_json,
+    generated_run_title,
     sha256_hex,
 )
 from .redaction import opaque_identifier, sanitize_sync_graph_payload
@@ -67,6 +68,7 @@ class EventStore:
         self._configure()
         self._migrate()
         self._migrate_node_indexes()
+        self._migrate_run_titles()
         self._migrate_sync_payloads()
         if self.path != ":memory:":
             os.chmod(self.path, 0o600)
@@ -316,6 +318,53 @@ class EventStore:
             self._finish_pending_checkpoint(
                 self.NODE_INDEX_CHECKPOINT_PENDING,
                 "legacy plaintext node-index WAL",
+            )
+
+    def _migrate_run_titles(self) -> None:
+        """Upgrade only known legacy generated titles; preserve explicit titles and IDs."""
+
+        boundary = self.connection.execute(
+            "SELECT value FROM metadata WHERE key = 'run_title_boundary_version'"
+        ).fetchone()
+        if boundary is not None and int(boundary["value"]) >= 1:
+            return
+        with self.transaction() as connection:
+            rows = connection.execute(
+                "SELECT * FROM nodes WHERE node_type = 'RUN'"
+            ).fetchall()
+            for row in rows:
+                run = self._decode_node_row(row)
+                actor_row = connection.execute(
+                    """
+                    SELECT actor.* FROM edges link
+                    JOIN nodes actor ON actor.node_id = link.target_id
+                    WHERE link.source_id = ? AND link.relation = 'ASSERTED_BY'
+                    LIMIT 1
+                    """,
+                    (run.id,),
+                ).fetchone()
+                if actor_row is None:
+                    continue
+                client = self._decode_node_row(actor_row).title.split(" / ", 1)[0]
+                if run.title != f"{client} run":
+                    continue
+                properties = {**run.properties, "title_source": "generated-safe-metadata"}
+                migrated = run.model_copy(
+                    update={
+                        "title": generated_run_title(
+                            client,
+                            run.valid_time.start,
+                            str(run.properties.get("status") or "unknown"),
+                        ),
+                        "properties": properties,
+                    }
+                )
+                self.upsert_node(connection, migrated)
+            connection.execute(
+                """
+                INSERT INTO metadata(key, value) VALUES ('run_title_boundary_version', '1')
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """
             )
 
     def _truncate_wal(self):

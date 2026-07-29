@@ -42,6 +42,7 @@ _ABSOLUTE_PATH_PATTERNS = (
     re.compile(r"(?<![\w.:/])/(?:[^/\s]+/)+[^\s,;]+"),
     re.compile(r"(?i)(?<![\w])(?:[a-z]:\\|\\\\)[^\s,;]+"),
 )
+_URL_PATTERN = re.compile(r"\b(?:https?|file)://\S+", re.IGNORECASE)
 _SENSITIVE_FILE_NAMES = {
     ".env",
     ".env.local",
@@ -75,6 +76,16 @@ def explicit_summary(payload: Mapping[str, Any]) -> str | None:
         summary = safe_text(payload.get(key))
         if summary:
             return summary
+    return None
+
+
+def explicit_session_title(payload: Mapping[str, Any]) -> str | None:
+    """Read only an explicitly named display title, never prompt-like content."""
+
+    for key in ("session_title", "workstream_title", "run_title"):
+        title = safe_text(payload.get(key), limit=120)
+        if title:
+            return _URL_PATTERN.sub("[REDACTED_URL]", title)
     return None
 
 

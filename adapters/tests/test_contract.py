@@ -202,6 +202,27 @@ class ContractTests(unittest.TestCase):
         second = normalize_capture("codex", {**common, "prompt": "second secret"})
         self.assertEqual(first.data["session_id"], second.data["session_id"])
 
+    def test_explicit_session_title_is_sanitized_without_retaining_raw_fields(self) -> None:
+        event = normalize_capture(
+            "codex",
+            {
+                "event": "stop",
+                "session_id": "550e8400-e29b-41d4-a716-446655440000",
+                "session_title": "Payments rollout https://secret.example/path",
+                "prompt": "do not retain this prompt",
+                "tool_result": "do not retain this result",
+                "command": "curl https://secret.example",
+                "headers": {"Authorization": "Bearer secret"},
+            },
+        )
+        serialized = event.to_json()
+        self.assertEqual(
+            event.data["session_title"], "Payments rollout [REDACTED_URL]"
+        )
+        self.assertIn("550e8400-e29b-41d4-a716-446655440000", serialized)
+        for sensitive in ("do not retain", "curl", "Authorization", "secret.example"):
+            self.assertNotIn(sensitive, serialized)
+
     def test_otlp_attributes_are_normalized_without_body(self) -> None:
         event = normalize_capture(
             "codex",

@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from .model import CloudEvent, make_event, stable_digest
 from .redaction import (
     artifact_references,
+    explicit_session_title,
     explicit_summary,
     opaque_reference,
     opaque_workspace,
@@ -96,6 +97,7 @@ def _effective_payload(payload: Mapping[str, Any], mode: str) -> Mapping[str, An
         "thread.id": "thread_id",
         "event.name": "event_name",
         "brainhub.summary": "brainhub_summary",
+        "brainhub.session.title": "session_title",
         "workspace.id": "workspace_id",
         "agent.version": "agent_version",
     }
@@ -204,6 +206,9 @@ def normalize_capture(
     summary = explicit_summary(payload)
     if summary:
         data["summary"] = summary
+    session_title = explicit_session_title(payload)
+    if session_title:
+        data["session_title"] = session_title
     artifacts = artifact_references(payload)
     if artifacts:
         data["artifacts"] = artifacts
