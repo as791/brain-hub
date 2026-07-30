@@ -168,6 +168,69 @@ def test_adapter_event_projects_and_is_searchable_through_http(service):
     assert search.json()["results"]
 
 
+def test_workstream_api_returns_safe_readable_projection(service):
+    client = TestClient(create_app(service))
+    events = [
+        adapter_event(
+            event_id="workstream-run-1",
+            session_id="550e8400-e29b-41d4-a716-446655440000",
+            session_title="Payments setup",
+            brainhub_summary="raw prompt /Users/alice/private token=supersecretvalue",
+            workstream_title="Payments /Users/alice/private",
+            prompt="do not expose this prompt",
+            tool_result="do not expose this result",
+        ),
+        adapter_event(
+            event_id="workstream-run-2",
+            session_id="550e8400-e29b-41d4-a716-446655440001",
+            session_title="Payments verification https://secret.example/path",
+            brainhub_summary="curl /Users/alice/private",
+            workstream_title="Payments /Users/alice/private",
+            status="failed",
+        ),
+    ]
+    for event in events:
+        event["subject"] = "workstream/payments"
+        event["data"]["workstream_title"] = "Payments /Users/alice/private"
+        assert client.post("/v1/events", json=event).status_code == 201
+
+    response = client.get("/v1/workstreams")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["provenance"] == {
+        "source": "canonical-graph",
+        "grade": "derived",
+        "projection_version": 2,
+    }
+    assert payload["workstreams"] == [
+        {
+            "id": payload["workstreams"][0]["id"],
+            "display_title": "Payments opaque://local-path",
+            "state": "needs_attention",
+            "next_action": None,
+            "privacy_class": "internal",
+            "run_count": 2,
+            "updated_at": payload["workstreams"][0]["updated_at"],
+        }
+    ]
+
+    workstream_id = payload["workstreams"][0]["id"]
+    timeline = client.get(f"/v1/workstreams/{workstream_id}/runs")
+    assert timeline.status_code == 200
+    assert [item["display_title"] for item in timeline.json()["timeline"]] == [
+        "Payments setup",
+        "Payments verification [REDACTED_URL]",
+    ]
+    assert [item["status"] for item in timeline.json()["timeline"]] == [
+        "completed",
+        "failed",
+    ]
+    serialized = response.text + timeline.text
+    for private in ("do not expose", "supersecretvalue", "curl", "/Users/alice", "secret.example"):
+        assert private not in serialized
+    assert client.get("/v1/workstreams/missing/runs").status_code == 404
+
+
 def test_write_does_not_rebuild_search_until_the_next_search(service, monkeypatch):
     rebuilds = 0
     original = service.search_index.rebuild

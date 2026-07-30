@@ -25,9 +25,10 @@ from fastapi.responses import JSONResponse
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from .graph import EvidenceGraph, GraphBoundsError, GraphNotFoundError
-from .models import BrainEvent, FeedbackRequest, NodeType
+from .models import DISPLAY_URL_RE, BrainEvent, FeedbackRequest, Node, NodeType
 from .orchestrator import AgentOrchestrator, OrchestratorRequest
 from .policy import CapturePolicyError
+from .redaction import redact_text
 from .service import BrainHubService
 from .store import EventIntegrityError, ProjectionIntegrityError
 
@@ -91,6 +92,52 @@ class SyncAckRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     last_sequence: int = Field(ge=1)
+
+
+class ProjectionProvenance(BaseModel):
+    source: Literal["canonical-graph"] = "canonical-graph"
+    grade: Literal["derived"] = "derived"
+    projection_version: int
+
+
+class WorkstreamSummary(BaseModel):
+    id: str
+    display_title: str
+    state: Literal["active", "waiting", "needs_attention", "done"]
+    next_action: None = None
+    privacy_class: str
+    run_count: int
+    updated_at: AwareDatetime
+
+
+class TimelineEntry(BaseModel):
+    id: str
+    display_title: str
+    status: str
+    occurred_at: AwareDatetime
+
+
+class WorkstreamListResponse(BaseModel):
+    workstreams: list[WorkstreamSummary]
+    provenance: ProjectionProvenance
+
+
+class WorkstreamTimelineResponse(BaseModel):
+    workstream_id: str
+    timeline: list[TimelineEntry]
+    provenance: ProjectionProvenance
+
+
+def _display_title(node: Node) -> str:
+    return DISPLAY_URL_RE.sub("[REDACTED_URL]", redact_text(node.title))
+
+
+def _workstream_state(status: object) -> str:
+    return {
+        "started": "active",
+        "completed": "done",
+        "failed": "needs_attention",
+    }.get(str(status), "waiting")
 
 
 def _authorized(value: str | None, expected: str | None) -> bool:
@@ -249,6 +296,65 @@ def create_app(
     ):
         return service.get_graph(
             node_limit=node_limit, edge_limit=edge_limit, valid_at=valid_at
+        )
+
+    @app.get("/v1/workstreams", response_model=WorkstreamListResponse)
+    def workstreams():
+        nodes, edges, projection_version = service.store.read_graph_snapshot()
+        run_counts: dict[str, int] = {}
+        for edge in edges:
+            if edge.relation.value == "HAS_RUN":
+                run_counts[edge.source_id] = run_counts.get(edge.source_id, 0) + 1
+        items = [
+            WorkstreamSummary(
+                id=node.id,
+                display_title=_display_title(node),
+                state=_workstream_state(node.properties.get("status")),
+                privacy_class=node.sensitivity.value.lower(),
+                run_count=run_counts.get(node.id, 0),
+                updated_at=node.recorded_time.start,
+            )
+            for node in nodes
+            if node.type == NodeType.WORKSTREAM
+        ]
+        items.sort(key=lambda item: item.updated_at, reverse=True)
+        return WorkstreamListResponse(
+            workstreams=items,
+            provenance=ProjectionProvenance(projection_version=projection_version),
+        )
+
+    @app.get(
+        "/v1/workstreams/{workstream_id}/runs",
+        response_model=WorkstreamTimelineResponse,
+    )
+    def workstream_runs(workstream_id: str):
+        nodes, edges, projection_version = service.store.read_graph_snapshot()
+        workstream = next(
+            (node for node in nodes if node.id == workstream_id and node.type == NodeType.WORKSTREAM),
+            None,
+        )
+        if workstream is None:
+            raise HTTPException(status_code=404, detail="workstream not found")
+        run_ids = {
+            edge.target_id
+            for edge in edges
+            if edge.source_id == workstream_id and edge.relation.value == "HAS_RUN"
+        }
+        timeline = [
+            TimelineEntry(
+                id=node.id,
+                display_title=_display_title(node),
+                status=str(node.properties.get("status") or "unknown"),
+                occurred_at=node.valid_time.start,
+            )
+            for node in nodes
+            if node.id in run_ids and node.type == NodeType.RUN
+        ]
+        timeline.sort(key=lambda item: item.occurred_at)
+        return WorkstreamTimelineResponse(
+            workstream_id=workstream_id,
+            timeline=timeline,
+            provenance=ProjectionProvenance(projection_version=projection_version),
         )
 
     @app.post("/v1/search")
