@@ -7,6 +7,7 @@ import { GraphScene } from './components/GraphScene'
 import { Timeline } from './components/Timeline'
 import { OrchestratorPanel } from './components/OrchestratorPanel'
 import { WorkStatusPanel } from './components/WorkStatusPanel'
+import { CommandCenter } from './components/CommandCenter'
 import { useReducedMotion, useWebGLSupport } from './hooks/useMedia'
 import {
   applySceneBudget,
@@ -50,6 +51,7 @@ function App() {
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [orchestratorOpen, setOrchestratorOpen] = useState(false)
+  const [primaryView, setPrimaryView] = useState<'command' | 'relationships'>('command')
   const [tokenDraft, setTokenDraft] = useState('')
   const [tokenRevision, setTokenRevision] = useState(0)
   const [anchorId, setAnchorId] = useState(demoGraph.anchorId ?? demoGraph.nodes[0].id)
@@ -333,7 +335,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#graph-content">Skip to graph</a>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
@@ -351,7 +353,11 @@ function App() {
         </div>
         <div className="topbar__actions">
           <button type="button" className="orchestrator-button" aria-expanded={orchestratorOpen} onClick={() => setOrchestratorOpen((open) => !open)}>✦ Ask Brain Hub</button>
-          <div className="scene-switcher" role="group" aria-label="Graph rendering mode">
+          <div className="view-switcher" role="group" aria-label="Primary view">
+            <button type="button" aria-pressed={primaryView === 'command'} onClick={() => setPrimaryView('command')}>Command Center</button>
+            <button type="button" aria-pressed={primaryView === 'relationships'} onClick={() => setPrimaryView('relationships')}>Relationships</button>
+          </div>
+          {primaryView === 'relationships' && <div className="scene-switcher" role="group" aria-label="Graph rendering mode">
             {(['3d', '2d', 'list'] as SceneMode[]).map((mode) => (
               <button
                 key={mode}
@@ -363,7 +369,7 @@ function App() {
                 {mode === 'list' ? 'List' : mode.toUpperCase()}
               </button>
             ))}
-          </div>
+          </div>}
           <button
             type="button"
             className="settings-button"
@@ -400,7 +406,10 @@ function App() {
         </form>
       )}
 
-      <main id="graph-content" className="workspace">
+      {primaryView === 'command' ? <CommandCenter graph={sourceGraph} connection={connection} onOpenRelationships={(node) => {
+        navigateToNode(node)
+        setPrimaryView('relationships')
+      }} /> : <main id="main-content" className="workspace">
         <Filters
           hiddenKinds={hiddenKinds}
           hiddenConfidence={hiddenConfidence}
@@ -558,7 +567,7 @@ function App() {
           onExplainPath={explainPath}
           onSelect={navigateToNode}
         />
-      </main>
+      </main>}
 
       {orchestratorOpen && <OrchestratorPanel anchorId={anchorId || undefined} hops={hops} onClose={() => setOrchestratorOpen(false)} onError={setError} />}
 
