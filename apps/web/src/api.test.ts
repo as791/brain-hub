@@ -72,6 +72,17 @@ describe('daemon JSON compatibility', () => {
     })
   })
 
+  it('replaces opaque session labels before they reach any UI surface', () => {
+    const uuid = 'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+    const graph = normalizeSnapshot({
+      nodes: [{ id: uuid, type: 'WORKSTREAM', title: `sessions/session_${uuid}`, summary: '' }],
+      edges: [],
+    })
+
+    expect(graph.nodes[0].label).toBe('Captured workstream')
+    expect(graph.nodes[0].label).not.toContain(uuid)
+  })
+
   it('converts canonical path nodes and edges into explained UI steps', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       nodes: [

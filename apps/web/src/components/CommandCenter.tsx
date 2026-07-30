@@ -1,4 +1,5 @@
 import type { BrainNode, ConnectionMode, GraphSnapshot } from '../types'
+import { displayTitle, formatLocalTime, safeDisplayText } from '../lib/display'
 import { workStatus } from '../lib/workStatus'
 
 interface Props {
@@ -26,6 +27,7 @@ function workstreamLane(node: BrainNode): Lane {
   return 'unknown'
 }
 
+const laneOrder: Lane[] = ['attention', 'active', 'waiting', 'unknown', 'done']
 const eventKinds = new Set(['Run', 'Task', 'Decision', 'Artifact'])
 
 function eventTime(node: BrainNode): number {
@@ -33,9 +35,8 @@ function eventTime(node: BrainNode): number {
   return Number.isNaN(time) ? 0 : time
 }
 
-function readableTime(node: BrainNode): string {
-  const time = eventTime(node)
-  return time ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(time) : 'Time unavailable'
+function capturedCount(graph: GraphSnapshot, keys: string[]): number {
+  return graph.nodes.filter((node) => keys.some((key) => safeDisplayText(node.metadata?.[key], '') !== '')).length
 }
 
 export function CommandCenter({ graph, connection, onOpenRelationships }: Props) {
@@ -45,63 +46,70 @@ export function CommandCenter({ graph, connection, onOpenRelationships }: Props)
   const runs = graph.nodes.filter((node) => node.kind === 'Run').sort((a, b) => eventTime(b) - eventTime(a)).slice(0, 3)
   const completed = tasks.filter((task) => task.state === 'completed').length
   const nextAction = workstreams.map((node) => node.metadata?.nextAction ?? node.metadata?.next_action).find((value) => typeof value === 'string')
+  const toolActivity = capturedCount(graph, ['toolName'])
+  const mcpActivity = capturedCount(graph, ['mcpToolName', 'mcpServer', 'mcpServerName'])
+  const groupedWorkstreams = Array.from(workstreams.reduce((groups, node) => {
+    const lane = workstreamLane(node)
+    const title = displayTitle(node, graph)
+    const key = `${lane}:${title}`
+    const current = groups.get(key)
+    groups.set(key, current ? { ...current, count: current.count + 1 } : { node, lane, title, count: 1 })
+    return groups
+  }, new Map<string, { node: BrainNode; lane: Lane; title: string; count: number }>()).values())
+    .sort((a, b) => laneOrder.indexOf(a.lane) - laneOrder.indexOf(b.lane))
+    .slice(0, 8)
 
   return (
     <main id="main-content" className="command-center">
       <header className="command-center__intro">
         <div>
-          <span className="command-eyebrow">Today · local work memory</span>
+          <span className="command-eyebrow">Local work memory</span>
           <h1>Command Center</h1>
-          <p>Follow active work, handoffs, and verification without opening the relationship graph.</p>
+          <p>Current work, recent activity, and capture availability at a glance.</p>
         </div>
         <div className="command-summary">
           <span>Next action</span>
-          <strong>{typeof nextAction === 'string' ? nextAction : 'Not recorded'}</strong>
-          <small>{tasks.length ? `${completed} of ${tasks.length} tasks complete` : 'Progress unavailable'}</small>
+          <strong>{safeDisplayText(nextAction, 'Not captured yet')}</strong>
+          <small>{tasks.length ? `${completed} of ${tasks.length} tasks complete` : 'Task progress not captured yet'}</small>
         </div>
       </header>
 
-      <section className="usage-strip" aria-label="Usage and capability summary">
-        {['Tokens', 'Cache reuse', 'Tools', 'MCP servers'].map((label) => <div key={label}><span>{label}</span><strong>Unavailable</strong></div>)}
-        <p>Telemetry is not available from the current API.</p>
+      <section className="usage-strip" aria-label="Activity and capture summary">
+        <div><span>Workstreams</span><strong>{workstreams.length}</strong></div>
+        <div><span>Recent activity</span><strong>{timeline.length}</strong></div>
+        <div><span>Tool activity</span><strong>{toolActivity ? `${toolActivity} captured` : 'Not captured yet'}</strong></div>
+        <div><span>MCP tools</span><strong>{mcpActivity ? `${mcpActivity} captured` : 'Not captured yet'}</strong></div>
       </section>
 
       <section className="command-grid">
         <div className="command-primary">
           <section className="workstream-board" aria-labelledby="workstreams-title">
             <header><div><span className="command-eyebrow">Workstreams</span><h2 id="workstreams-title">What needs your attention</h2></div><small>{workstreams.length} total</small></header>
-            <div className="workstream-lanes">
-              {(['active', 'waiting', 'attention', 'done', 'unknown'] as Lane[]).map((lane) => {
-                const items = workstreams.filter((node) => workstreamLane(node) === lane)
-                return <section key={lane} className="workstream-lane" data-lane={lane} aria-label={laneCopy[lane]}>
-                  <header><strong>{laneCopy[lane]}</strong><span>{items.length}</span></header>
-                  {items.map((node) => <button key={node.id} type="button" onClick={() => onOpenRelationships(node)}>
-                    <strong>{node.label}</strong>
-                    <span>{node.summary || 'Summary unavailable'}</span>
-                    <small>{workstreamLane(node) === 'unknown' ? 'No workstream state was provided' : 'Open relationships →'}</small>
-                  </button>)}
-                  {!items.length && <p>No workstreams</p>}
-                </section>
-              })}
-            </div>
+            {groupedWorkstreams.length ? <div className="workstream-list">
+              {groupedWorkstreams.map(({ node, lane, title, count }) => <button key={`${lane}:${title}`} type="button" onClick={() => onOpenRelationships(node)}>
+                <span className="workstream-state" data-lane={lane}>{laneCopy[lane]}</span>
+                <span><strong>{title}</strong><small>{safeDisplayText(node.summary, 'Summary not captured yet')}</small></span>
+                <em>{count > 1 ? `${count} records` : 'View relationships'} →</em>
+              </button>)}
+            </div> : <p className="command-empty">Workstream activity is not captured yet.</p>}
           </section>
 
           <section className="activity-timeline" aria-labelledby="timeline-title">
             <header><div><span className="command-eyebrow">Readable timeline</span><h2 id="timeline-title">Recent activity</h2></div><small>{timeline.length} events shown</small></header>
             {timeline.length ? <ol>{timeline.map((node) => <li key={node.id}>
-              <time dateTime={node.validFrom}>{readableTime(node)}</time>
+              <time dateTime={node.validTimeKnown === false ? undefined : node.validFrom}>{formatLocalTime(node)}</time>
               <span className="timeline-marker" data-kind={node.kind} />
-              <div><small>{node.kind} · {node.provenance[0]?.agent ?? 'Source unavailable'}</small><strong>{node.label}</strong><p>{node.summary || 'Details unavailable'}</p></div>
-            </li>)}</ol> : <p className="command-empty">No timeline activity is available.</p>}
+              <div><small>{node.kind} · {safeDisplayText(node.provenance[0]?.agent, 'Source not captured')}</small><strong>{displayTitle(node, graph)}</strong><p>{safeDisplayText(node.summary, 'Details not captured yet')}</p></div>
+            </li>)}</ol> : <p className="command-empty">Recent activity is not captured yet.</p>}
           </section>
         </div>
 
         <aside className="command-secondary">
-          <section><header><div><span className="command-eyebrow">Recent runs</span><h2>Latest sessions</h2></div></header>
-            {runs.length ? <ul>{runs.map((run) => <li key={run.id}><strong>{run.label}</strong><span>{run.provenance[0]?.agent ?? 'Source unavailable'} · {readableTime(run)}</span></li>)}</ul> : <p className="command-empty">No runs recorded.</p>}
+          <section><header><div><span className="command-eyebrow">Recent activity</span><h2>Latest captured runs</h2></div></header>
+            {runs.length ? <ul>{runs.map((run) => <li key={run.id}><strong>{displayTitle(run, graph)}</strong><span>{safeDisplayText(run.provenance[0]?.agent, 'Source not captured')} · {formatLocalTime(run)}</span></li>)}</ul> : <p className="command-empty">Run activity is not captured yet.</p>}
           </section>
-          <section><header><div><span className="command-eyebrow">Tool &amp; MCP health</span><h2>Capability status</h2></div></header>
-            <dl><div><dt>Tool health</dt><dd>Unavailable</dd></div><div><dt>MCP health</dt><dd>Unavailable</dd></div><div><dt>Verification</dt><dd>{tests.length ? `${tests.length} result${tests.length === 1 ? '' : 's'}` : 'Unavailable'}</dd></div><div><dt>Daemon</dt><dd>{connection === 'live' ? 'Connected' : connection === 'demo' ? 'Demo data' : 'Offline'}</dd></div></dl>
+          <section><header><div><span className="command-eyebrow">Capture status</span><h2>Tools &amp; verification</h2></div></header>
+            <dl><div><dt>Tool activity</dt><dd>{toolActivity ? `${toolActivity} captured` : 'Not captured yet'}</dd></div><div><dt>MCP tools</dt><dd>{mcpActivity ? `${mcpActivity} captured` : 'Not captured yet'}</dd></div><div><dt>Verification</dt><dd>{tests.length ? `${tests.length} result${tests.length === 1 ? '' : 's'} captured` : 'Not captured yet'}</dd></div><div><dt>Daemon</dt><dd>{connection === 'live' ? 'Connected' : connection === 'demo' ? 'Demo data' : 'Offline'}</dd></div></dl>
             <p className="privacy-note">Only allowlisted graph fields are shown. Tool payloads and private content stay out of this view.</p>
           </section>
         </aside>

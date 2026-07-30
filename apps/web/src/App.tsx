@@ -353,10 +353,9 @@ function App() {
         </div>
         <div className="topbar__actions">
           <button type="button" className="orchestrator-button" aria-expanded={orchestratorOpen} onClick={() => setOrchestratorOpen((open) => !open)}>✦ Ask Brain Hub</button>
-          <div className="view-switcher" role="group" aria-label="Primary view">
-            <button type="button" aria-pressed={primaryView === 'command'} onClick={() => setPrimaryView('command')}>Command Center</button>
-            <button type="button" aria-pressed={primaryView === 'relationships'} onClick={() => setPrimaryView('relationships')}>Relationships</button>
-          </div>
+          <button type="button" className="view-switcher" onClick={() => setPrimaryView(primaryView === 'command' ? 'relationships' : 'command')}>
+            {primaryView === 'command' ? 'Relationships' : '← Command Center'}
+          </button>
           {primaryView === 'relationships' && <div className="scene-switcher" role="group" aria-label="Graph rendering mode">
             {(['3d', '2d', 'list'] as SceneMode[]).map((mode) => (
               <button

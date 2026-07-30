@@ -11,6 +11,7 @@ import type {
   OrchestratorJob,
   OrchestratorRequest,
 } from './types'
+import { safeDisplayText } from './lib/display'
 
 const trimSlash = (value: string) => value.replace(/\/$/, '')
 
@@ -115,9 +116,9 @@ function normalizeEvidence(value: unknown, index: number): BrainNode['evidence']
   const anchor = data.anchor ? String(data.anchor) : undefined
   return {
     id: String(data.id ?? data.evidenceId ?? `${sourceEventId || 'evidence'}:${index}`),
-    label: String(data.label ?? anchor ?? (sourceEventId ? `Source event ${sourceEventId}` : `Evidence ${index + 1}`)),
+    label: safeDisplayText(data.label ?? anchor, `Source evidence ${index + 1}`),
     uri: uri ? String(uri) : undefined,
-    excerpt: data.excerpt ? String(data.excerpt) : undefined,
+    excerpt: data.excerpt ? safeDisplayText(data.excerpt, '') || undefined : undefined,
     contentHash: data.contentHash ? String(data.contentHash) : undefined,
     recordedAt: data.recordedAt ? String(data.recordedAt) : undefined,
   }
@@ -126,8 +127,8 @@ function normalizeEvidence(value: unknown, index: number): BrainNode['evidence']
 function normalizeProvenance(value: unknown): BrainNode['provenance'][number] {
   const data = objectValue(camelize(value))
   return {
-    actor: String(data.actor ?? data.actorId ?? 'unknown'),
-    agent: data.agent ? String(data.agent) : undefined,
+    actor: safeDisplayText(data.actor ?? data.actorId, 'Source not captured'),
+    agent: data.agent ? safeDisplayText(data.agent, 'Agent') : undefined,
     extractor: data.extractor ? String(data.extractor) : undefined,
     extractorVersion: data.extractorVersion ? String(data.extractorVersion) : undefined,
     workspace: data.workspace ? String(data.workspace) : undefined,
@@ -146,12 +147,14 @@ function normalizeNode(value: unknown): BrainNode {
   const properties = objectValue(data.properties)
   const validFrom = String(data.validFrom ?? validTime.start ?? data.recordedAt ?? recordedTime.start ?? new Date(0).toISOString())
   const recordedAt = String(data.recordedAt ?? recordedTime.start ?? data.validFrom ?? validTime.start ?? new Date(0).toISOString())
+  const kind = normalizeKind(data.kind ?? data.nodeType ?? data.type)
+  const fallbackLabel = kind === 'Run' ? 'Captured activity' : kind === 'Workstream' ? 'Captured workstream' : `Captured ${kind.toLowerCase()}`
   return {
     ...(data as unknown as BrainNode),
     id: String(data.id ?? data.nodeId ?? ''),
-    label: String(data.label ?? data.title ?? data.name ?? data.id ?? 'Untitled node'),
-    kind: normalizeKind(data.kind ?? data.nodeType ?? data.type),
-    summary: String(data.summary ?? data.description ?? ''),
+    label: safeDisplayText(data.label ?? data.title ?? data.name, fallbackLabel),
+    kind,
+    summary: safeDisplayText(data.summary ?? data.description, ''),
     validFrom,
     validTo: data.validTo || validTime.end ? String(data.validTo ?? validTime.end) : null,
     validTimeKnown: data.validTimeKnown === false ? false : validFrom !== UNKNOWN_EVENT_TIME,
@@ -160,7 +163,9 @@ function normalizeNode(value: unknown): BrainNode {
     confidenceClass: (data.confidenceClass ?? 'EXTRACTED') as BrainNode['confidenceClass'],
     provenance: provenanceValues.filter((entry) => entry && typeof entry === 'object').map(normalizeProvenance),
     evidence: (Array.isArray(rawEvidence) ? rawEvidence : []).map(normalizeEvidence),
-    tags: (Array.isArray(data.tags) ? data.tags : Array.isArray(properties.tags) ? properties.tags : []).map(String),
+    tags: (Array.isArray(data.tags) ? data.tags : Array.isArray(properties.tags) ? properties.tags : [])
+      .map((tag) => safeDisplayText(tag, ''))
+      .filter(Boolean),
     sensitivity: data.sensitivity as BrainNode['sensitivity'],
     reviewState: normalizeReviewState(data.reviewState),
     metadata: properties,
@@ -186,7 +191,7 @@ function normalizeEdge(value: unknown): BrainEdge {
     source: String(data.source ?? data.sourceId ?? ''),
     target: String(data.target ?? data.targetId ?? ''),
     relation: String(data.relation ?? data.kind ?? data.edgeType ?? 'REFERENCES'),
-    explanation: String(data.explanation ?? data.description ?? ''),
+    explanation: safeDisplayText(data.explanation ?? data.description, ''),
     validFrom,
     validTo: data.validTo || validTime.end ? String(data.validTo ?? validTime.end) : null,
     validTimeKnown: data.validTimeKnown === false ? false : validFrom !== UNKNOWN_EVENT_TIME,
