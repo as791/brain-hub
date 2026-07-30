@@ -12,11 +12,19 @@ afterEach(cleanup)
 
 describe('Command Center', () => {
   it('prioritizes work and timeline while keeping missing telemetry explicit', () => {
-    const graph: GraphSnapshot = { nodes: [node('work', 'Workstream', { status: 'active' }), node('run', 'Run')], edges: [] }
+    const privateCapture = 'PRIVATE_CAPTURE_CANARY'
+    const graph: GraphSnapshot = {
+      nodes: [
+        node('work', 'Workstream', { status: 'active', capture: privateCapture }),
+        node('run', 'Run', { brainhub_summary: privateCapture, prompt: privateCapture, tool_result: privateCapture }),
+      ],
+      edges: [],
+    }
     render(<CommandCenter graph={graph} connection="live" onOpenRelationships={vi.fn()} />)
 
-    expect(screen.getByRole('heading', { name: 'What needs your attention' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Recent activity' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Active' })).toHaveTextContent('work title')
+    expect(screen.getByRole('region', { name: 'Recent activity' })).toHaveTextContent('run title')
+    expect(screen.queryByText(privateCapture)).not.toBeInTheDocument()
     expect(screen.getAllByText('Unavailable').length).toBeGreaterThanOrEqual(6)
     expect(screen.queryByLabelText('Brain Hub graph explorer')).not.toBeInTheDocument()
   })
